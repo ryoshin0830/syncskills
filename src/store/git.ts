@@ -94,7 +94,6 @@ export function createGitStore(opts: {
     },
 
     async writeManifest(m) {
-      m.generatedAt = new Date().toISOString()
       await writeFile(join(dir, 'manifest.json'), serializeManifest(m))
     },
 

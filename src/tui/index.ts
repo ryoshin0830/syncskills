@@ -142,7 +142,10 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
         await copyTree(source, localDir)
       }
 
-      const writer = createWriter({ paths: opts.paths })
+      const writer = createWriter({
+        paths: opts.paths,
+        ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+      })
       await writer.importSkill(c.id, c.resolution.apps)
 
       const side = { contentHash: await treeHash(localDir), apps: c.resolution.apps }
@@ -168,7 +171,10 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
     }
   }
 
-  const writer = createWriter({ paths: opts.paths })
+  const writer = createWriter({
+    paths: opts.paths,
+    ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+  })
   const aspin = p.spinner()
   aspin.start('Applying')
   const result = await applyPlan(plan, {

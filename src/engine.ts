@@ -51,6 +51,8 @@ export interface EngineOptions {
   token?: string
   /** Point the store at a local path instead of the configured host. Tests only. */
   remoteOverride?: string
+  /** Use a different cc-switch binary. Tests only. */
+  ccBin?: string
 }
 
 const ALL_KINDS: ItemKind[] = ['skill', 'mcp', 'repo']
@@ -122,7 +124,10 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
   const { resolutions, store, manifest, state, blob, secrets } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
 
-  const writer = createWriter({ paths: opts.paths })
+  const writer = createWriter({
+    paths: opts.paths,
+    ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+  })
   const result = await applyPlan(plan, {
     paths: opts.paths, writer, store, manifest, state, secrets, blob,
     device: opts.config.device, configDir: opts.configDir, dryRun: opts.dryRun,

@@ -79,6 +79,15 @@ describe('manifest', () => {
     expect(manifestSides(m, 'mcp').get('x')!.contentHash).toBe('sha256:m')
   })
 
+  it('carries no generated-at stamp, so a no-op sync produces no commit', () => {
+    const m = emptyManifest()
+    upsertEntry(m, 'skill', 'a', { contentHash: 'sha256:1', apps: [] }, 'dev')
+    const first = serializeManifest(m)
+    const second = serializeManifest(parseManifest(first))
+    expect(second).toBe(first)
+    expect(first).not.toMatch(/generatedAt/)
+  })
+
   it('removes an entry', () => {
     const m = emptyManifest()
     upsertEntry(m, 'skill', 'a', { contentHash: 'sha256:1', apps: [] }, 'dev')

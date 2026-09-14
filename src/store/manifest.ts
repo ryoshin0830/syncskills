@@ -15,12 +15,11 @@ export interface ManifestEntry {
 
 export interface Manifest {
   schemaVersion: 1
-  generatedAt: string
   entries: Record<string, ManifestEntry>
 }
 
 export function emptyManifest(): Manifest {
-  return { schemaVersion: 1, generatedAt: new Date(0).toISOString(), entries: {} }
+  return { schemaVersion: 1, entries: {} }
 }
 
 /**
@@ -45,11 +44,15 @@ export function parseManifest(text: string): Manifest {
   return m
 }
 
-/** Keys are emitted in sorted order so an unchanged sync produces no git diff. */
+/**
+ * A pure function of the entries: same entries, same bytes. There is
+ * deliberately no generated-at stamp — one would change on every run and turn
+ * every no-op sync into a commit, filling the history with noise.
+ */
 export function serializeManifest(m: Manifest): string {
   const entries: Record<string, ManifestEntry> = {}
   for (const k of Object.keys(m.entries).sort()) entries[k] = m.entries[k]!
-  return JSON.stringify({ schemaVersion: 1, generatedAt: m.generatedAt, entries }, null, 2) + '\n'
+  return JSON.stringify({ schemaVersion: 1, entries }, null, 2) + '\n'
 }
 
 export function manifestSides(m: Manifest, kind: ItemKind): Map<string, Side> {
