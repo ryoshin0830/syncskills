@@ -1,5 +1,6 @@
-import { readdir, stat, lstat, mkdir, copyFile, readlink } from 'node:fs/promises'
+import { readdir, stat, lstat, mkdir, copyFile, readlink, realpath } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import type { Stats } from 'node:fs'
 
 export const IGNORED = new Set(['.DS_Store', '.git', 'node_modules', '__pycache__'])
 
@@ -9,15 +10,35 @@ function isIgnored(name: string): boolean {
 
 export interface WalkEntry { abs: string; rel: string; mode: number }
 
-export async function* walk(dir: string, base = dir): AsyncGenerator<WalkEntry> {
+// `seen` holds the resolved real path of every directory already entered, so a
+// symlink cycle terminates here rather than at whatever depth the host OS
+// happens to enforce — otherwise the same tree hashes differently per machine.
+export async function* walk(
+  dir: string, base = dir, seen: Set<string> = new Set(),
+): AsyncGenerator<WalkEntry> {
+  const real = await realpath(dir).catch(() => dir)
+  if (seen.has(real)) return
+  seen.add(real)
+
   const entries = await readdir(dir, { withFileTypes: true })
   for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (isIgnored(e.name)) continue
     const abs = join(dir, e.name)
-    const st = await stat(abs).catch(() => null)
-    if (st === null) continue
+
+    let st: Stats
+    try {
+      st = await stat(abs)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      // A dangling symlink or an entry that vanished mid-walk is not content.
+      // Anything else — a permission error, a failing disk — must not be
+      // silently dropped from the hash.
+      if (code === 'ENOENT' || code === 'ELOOP') continue
+      throw err
+    }
+
     if (st.isDirectory()) {
-      yield* walk(abs, base)
+      yield* walk(abs, base, seen)
     } else if (st.isFile()) {
       yield { abs, rel: relative(base, abs).split(sep).join('/'), mode: st.mode }
     }

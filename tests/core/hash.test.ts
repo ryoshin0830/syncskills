@@ -20,6 +20,33 @@ describe('canonicalize', () => {
   it('drops undefined members', () => {
     expect(canonicalize({ a: 1, b: undefined })).toBe('{"a":1}')
   })
+
+  it('refuses to hash a non-finite number instead of encoding it as null', () => {
+    for (const v of [NaN, Infinity, -Infinity]) {
+      expect(() => canonicalize(v)).toThrow(/non-finite/)
+    }
+  })
+
+  it('refuses to hash a Date, which would otherwise collide with {}', () => {
+    expect(() => canonicalize(new Date(0))).toThrow(/Date instance/)
+  })
+
+  it('refuses to hash a class instance', () => {
+    class Thing { a = 1 }
+    expect(() => canonicalize(new Thing())).toThrow(/only plain JSON objects/)
+  })
+
+  it('still accepts a null-prototype object', () => {
+    const o = Object.create(null) as Record<string, unknown>
+    o.a = 1
+    expect(canonicalize(o)).toBe('{"a":1}')
+  })
+
+  it('keeps null distinct from every other value', () => {
+    expect(canonicalJsonHash(null)).not.toBe(canonicalJsonHash(0))
+    expect(canonicalJsonHash(null)).not.toBe(canonicalJsonHash('null'))
+    expect(canonicalJsonHash(null)).not.toBe(canonicalJsonHash({}))
+  })
 })
 
 describe('treeHash', () => {
@@ -85,4 +112,14 @@ describe('treeHash', () => {
   it('throws when the directory is missing', async () => {
     await expect(treeHash(join(dir, 'nope'))).rejects.toThrow()
   })
+
+  it('terminates on a directory symlink cycle instead of relying on the OS depth limit', async () => {
+    await writeFile(join(dir, 'SKILL.md'), 'x')
+    await mkdir(join(dir, 'sub'))
+    await writeFile(join(dir, 'sub', 'a.md'), 'a')
+    await symlink(dir, join(dir, 'sub', 'loop'))
+    const h = await treeHash(dir)
+    expect(h.startsWith('sha256:')).toBe(true)
+    expect(await treeHash(dir)).toBe(h)
+  }, 15_000)
 })
