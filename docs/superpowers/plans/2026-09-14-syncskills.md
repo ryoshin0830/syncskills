@@ -63,7 +63,7 @@
 ## Task 1: Project skeleton, CLI framing, exit codes
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `tsup.config.ts`, `vitest.config.ts`, `.gitignore`, `src/cli.ts`, `src/help.ts`, `src/util/exec.ts`
+- Create: `package.json`, `tsconfig.json`, `tsup.config.ts`, `vitest.config.ts`, `.gitignore`, `src/cli.ts`, `src/util/exec.ts`, `package-lock.json` (commit the lockfile — `npm ci` and reproducible CI installs depend on it)
 - Test: `tests/cli.test.ts`
 
 **Interfaces:**
@@ -294,7 +294,7 @@ Expected: PASS, 7 tests
 - [ ] **Step 5: Commit**
 
 ```bash
-git add package.json tsconfig.json tsup.config.ts vitest.config.ts .gitignore src tests
+git add package.json package-lock.json tsconfig.json tsup.config.ts vitest.config.ts .gitignore src tests
 git commit -m "feat: project skeleton with argument parsing and exit code contract"
 ```
 
