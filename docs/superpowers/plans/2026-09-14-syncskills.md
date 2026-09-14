@@ -13,7 +13,12 @@
 ## Global Constraints
 
 - Package name `syncskills`; bins `syncskills` and `ssync`. Repo `github.com/ryoshin0830/syncskills`.
-- Node `>=20.0.0`. ESM only (`"type": "module"`).
+- Node `>=22.13.0`. ESM only (`"type": "module"`). The floor is set by `node:sqlite`, which
+  did not exist before Node 22.5.0 and required `--experimental-sqlite` until 22.13.0 / 23.4.0.
+  `src/ccswitch/read.ts` must additionally guard the import and fail with an actionable message
+  rather than a stack trace when the module is absent.
+- `node:sqlite` prints an `ExperimentalWarning` on first use. `src/cli.ts` suppresses that one
+  warning class so ordinary CLI runs stay clean; every other warning still surfaces.
 - Runtime dependencies limited to `@clack/prompts` and `picocolors`. SQLite uses the built-in `node:sqlite`. No native modules — `npx` must start fast.
 - Exit codes are fixed: `0` success, `1` error, `2` unresolved conflict or pending manual action, `3` not initialized.
 - Config directory is `~/.config/syncskills` (override: `--config`, or `$SYNCSKILLS_CONFIG_DIR`).
@@ -131,7 +136,7 @@ Expected: FAIL — `Cannot find module '../src/cli.js'`
   "description": "Perfect multi-device sync for AI agent skills and MCP servers, built on cc-switch, GitHub and 1Password.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=20.0.0" },
+  "engines": { "node": ">=22.13.0" },
   "bin": { "syncskills": "./dist/cli.js", "ssync": "./dist/cli.js" },
   "files": ["dist", "README.md", "LICENSE"],
   "repository": { "type": "git", "url": "git+https://github.com/ryoshin0830/syncskills.git" },
@@ -180,7 +185,7 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
   entry: ['src/cli.ts'],
   format: ['esm'],
-  target: 'node20',
+  target: 'node22',
   clean: true,
   banner: { js: '#!/usr/bin/env node' },
 })
@@ -4335,10 +4340,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22.x', '24.x']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with: { node-version: '${{ matrix.node }}' }
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
