@@ -444,8 +444,9 @@ export interface Item {
 
 `src/util/fs.ts`:
 ```ts
-import { readdir, stat, lstat, mkdir, copyFile, readlink } from 'node:fs/promises'
+import { readdir, stat, lstat, mkdir, copyFile, readlink, realpath } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import type { Stats } from 'node:fs'
 
 export const IGNORED = new Set(['.DS_Store', '.git', 'node_modules', '__pycache__'])
 
@@ -455,15 +456,35 @@ function isIgnored(name: string): boolean {
 
 export interface WalkEntry { abs: string; rel: string; mode: number }
 
-export async function* walk(dir: string, base = dir): AsyncGenerator<WalkEntry> {
+// `seen` holds the resolved real path of every directory already entered, so a
+// symlink cycle terminates here rather than at whatever depth the host OS
+// happens to enforce — otherwise the same tree hashes differently per machine.
+export async function* walk(
+  dir: string, base = dir, seen: Set<string> = new Set(),
+): AsyncGenerator<WalkEntry> {
+  const real = await realpath(dir).catch(() => dir)
+  if (seen.has(real)) return
+  seen.add(real)
+
   const entries = await readdir(dir, { withFileTypes: true })
   for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
     if (isIgnored(e.name)) continue
     const abs = join(dir, e.name)
-    const st = await stat(abs).catch(() => null)
-    if (st === null) continue
+
+    let st: Stats
+    try {
+      st = await stat(abs)
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      // A dangling symlink or an entry that vanished mid-walk is not content.
+      // Anything else — a permission error, a failing disk — must not be
+      // silently dropped from the hash.
+      if (code === 'ENOENT' || code === 'ELOOP') continue
+      throw err
+    }
+
     if (st.isDirectory()) {
-      yield* walk(abs, base)
+      yield* walk(abs, base, seen)
     } else if (st.isFile()) {
       yield { abs, rel: relative(base, abs).split(sep).join('/'), mode: st.mode }
     }
@@ -495,17 +516,47 @@ import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import { walk } from '../util/fs.js'
 
+// Injective over the JSON value space. Anything outside it throws rather than
+// collapsing to a shared encoding: a silent collision here would make two
+// different configs look identical and cost the user an edit.
 export function canonicalize(value: unknown): string {
   if (value === null) return 'null'
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`
-  if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
-    return `{${entries.join(',')}}`
+
+  const t = typeof value
+  if (t === 'boolean' || t === 'string') return JSON.stringify(value)
+  if (t === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new Error(
+        `cannot hash the non-finite number ${String(value)}: JSON cannot represent it, ` +
+        `and every non-finite value would otherwise encode as null`,
+      )
+    }
+    return JSON.stringify(value)
   }
-  return JSON.stringify(value) ?? 'null'
+  if (t !== 'object') {
+    throw new Error(`cannot hash a value of type ${t}`)
+  }
+
+  if (Array.isArray(value)) {
+    // Parsed JSON arrays never contain undefined; encode it as null if one
+    // reaches us, matching JSON.stringify.
+    return `[${value.map((v) => (v === undefined ? 'null' : canonicalize(v))).join(',')}]`
+  }
+
+  const proto = Object.getPrototypeOf(value) as object | null
+  if (proto !== Object.prototype && proto !== null) {
+    const name = (value as { constructor?: { name?: string } }).constructor?.name ?? 'non-plain'
+    throw new Error(
+      `cannot hash a ${name} instance: only plain JSON objects are hashable, and ` +
+      `a class instance would encode as {} alongside every other one`,
+    )
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalize(v)}`)
+  return `{${entries.join(',')}}`
 }
 
 export function canonicalJsonHash(value: unknown): string {
