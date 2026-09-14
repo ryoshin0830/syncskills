@@ -4,11 +4,32 @@
   "description": "Perfect multi-device sync for AI agent skills and MCP servers, built on cc-switch, GitHub and 1Password.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=20.0.0" },
-  "bin": { "syncskills": "./dist/cli.js", "ssync": "./dist/cli.js" },
-  "files": ["dist", "README.md", "LICENSE"],
-  "repository": { "type": "git", "url": "git+https://github.com/ryoshin0830/syncskills.git" },
-  "keywords": ["skills", "mcp", "sync", "cc-switch", "claude-code", "codex", "hermes", "cli"],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "bin": {
+    "syncskills": "./dist/cli.js",
+    "ssync": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryoshin0830/syncskills.git"
+  },
+  "keywords": [
+    "skills",
+    "mcp",
+    "sync",
+    "cc-switch",
+    "claude-code",
+    "codex",
+    "hermes",
+    "cli"
+  ],
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
