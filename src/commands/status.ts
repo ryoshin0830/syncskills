@@ -1,0 +1,46 @@
+import pc from 'picocolors'
+import { gather } from '../engine.js'
+import { buildPlan } from '../core/plan.js'
+import { narrowByDirection } from '../engine.js'
+import { emitJson, line } from '../output.js'
+import { summarize } from '../tui/diff.js'
+import type { EngineOptions } from '../engine.js'
+import type { Io } from '../output.js'
+
+export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
+  const { resolutions } = await gather(opts)
+  const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  if (io.json) {
+    emitJson('status', {
+      device: opts.config.device,
+      counts: plan.counts,
+      items: resolutions.map((r) => ({
+        kind: r.kind, id: r.id, decision: r.decision,
+        ...(r.conflictKind === undefined ? {} : { conflictKind: r.conflictKind }),
+        apps: r.apps,
+        base: r.base?.contentHash ?? null,
+        local: r.local?.contentHash ?? null,
+        remote: r.remote?.contentHash ?? null,
+      })),
+      conflicts: plan.conflicts.map((c) => ({ kind: c.kind, id: c.id })),
+    }, io)
+    return 0
+  }
+
+  const rows = summarize(plan)
+  if (rows.length === 0) {
+    line(pc.green('Everything is in sync.'), io)
+    return 0
+  }
+
+  line('', io)
+  for (const row of rows) line(`  ${String(row.count).padStart(3)}  ${row.label}`, io)
+  line('', io)
+  for (const a of [...plan.actions, ...plan.conflicts]) {
+    const mark = a.type === 'merge' ? pc.yellow('conflict') : pc.dim(a.type)
+    line(`  ${mark.padEnd(24)} ${a.kind}/${a.id}`, io)
+  }
+  line('', io)
+  return 0
+}
