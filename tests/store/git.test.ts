@@ -20,6 +20,14 @@ describe('remoteUrl', () => {
   it('builds an https URL for a GHES host', () => {
     expect(remoteUrl({ ...base, host: 'git.pepabo.com' })).toBe('https://git.pepabo.com/o/r.git')
   })
+  it('uses an explicit remote when one is configured', () => {
+    expect(remoteUrl({ ...base, remote: 'git@example.com:me/store.git' }))
+      .toBe('git@example.com:me/store.git')
+    expect(remoteUrl({ ...base, remote: '/srv/git/store.git' })).toBe('/srv/git/store.git')
+  })
+  it('ignores an empty explicit remote', () => {
+    expect(remoteUrl({ ...base, remote: '' })).toBe('https://github.com/o/r.git')
+  })
 })
 
 describe('GitStore', () => {

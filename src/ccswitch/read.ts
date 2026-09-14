@@ -1,5 +1,5 @@
 import { loadDatabaseSync } from '../util/sqlite.js'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { APPS } from '../core/types.js'
 import type { App, Side } from '../core/types.js'
@@ -155,6 +155,21 @@ export function localMcpSides(p: CcPaths): Map<string, Side> {
     })
   }
   return out
+}
+
+/**
+ * Directories sitting in the skills folder that cc-switch has no row for.
+ * syncskills syncs what cc-switch manages, so these are skipped — but silently
+ * skipping a directory the user can see is how trust is lost, so they are
+ * reported instead. `cc-switch skills import-from-apps <dir>` adopts one.
+ */
+export function unmanagedSkills(p: CcPaths): string[] {
+  if (!existsSync(p.skillsDir)) return []
+  const managed = new Set(readSkills(p).map((r) => r.directory))
+  return readdirSync(p.skillsDir, { withFileTypes: true })
+    .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !managed.has(e.name))
+    .map((e) => e.name)
+    .sort()
 }
 
 export function localRepoSides(p: CcPaths): Map<string, Side> {

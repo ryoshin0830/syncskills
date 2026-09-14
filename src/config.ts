@@ -19,6 +19,11 @@ export interface Config {
   secrets: boolean
   /** Item ids never synced from this machine */
   excludes: string[]
+  /**
+   * An explicit git remote, used instead of building one from host/owner/repo.
+   * Lets the store live on self-hosted git, an ssh remote, or a local path.
+   */
+  remote?: string
 }
 
 export function configDir(

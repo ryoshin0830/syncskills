@@ -35,6 +35,8 @@ export interface CcWriter {
   importSkill(dir: string, apps: App[]): Promise<void>
   setSkillApps(dir: string, apps: App[]): Promise<void>
   syncSkills(): Promise<void>
+  addRepo(owner: string, name: string, branch: string, enabled: boolean): Promise<void>
+  removeRepo(owner: string, name: string): Promise<void>
 }
 
 export function createWriter(opts: {
@@ -73,6 +75,19 @@ export function createWriter(opts: {
 
     async syncSkills() {
       await cc(['skills', 'sync'], 'skills sync')
+    },
+
+    async addRepo(owner, name, branch, enabled) {
+      const spec = branch === '' || branch === 'main' ? `${owner}/${name}` : `${owner}/${name}@${branch}`
+      await cc(['skills', 'repos', 'add', spec], 'skills repos add')
+      await cc(
+        ['skills', 'repos', enabled ? 'enable' : 'disable', `${owner}/${name}`],
+        `skills repos ${enabled ? 'enable' : 'disable'}`,
+      )
+    },
+
+    async removeRepo(owner, name) {
+      await cc(['skills', 'repos', 'remove', `${owner}/${name}`], 'skills repos remove')
     },
 
     /**

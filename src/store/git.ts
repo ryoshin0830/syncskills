@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { run } from '../util/exec.js'
 import type { Config } from '../config.js'
 import { emptyManifest, parseManifest, serializeManifest } from './manifest.js'
@@ -8,6 +8,7 @@ import type { Manifest } from './manifest.js'
 import type { ItemKind } from '../core/types.js'
 
 export function remoteUrl(c: Config): string {
+  if (c.remote !== undefined && c.remote !== '') return c.remote
   return `https://${c.host}/${c.owner}/${c.repo}.git`
 }
 
@@ -108,9 +109,10 @@ export function createGitStore(opts: {
     },
 
     async writeItemJson(kind, id, value) {
-      const d = join(dir, DIR_OF[kind])
-      await mkdir(d, { recursive: true })
-      await writeFile(join(d, `${id}.json`), JSON.stringify(value, null, 2) + '\n')
+      // A repository id is "owner/name", so the parent may be nested.
+      const file = join(dir, DIR_OF[kind], `${id}.json`)
+      await mkdir(dirname(file), { recursive: true })
+      await writeFile(file, JSON.stringify(value, null, 2) + '\n')
     },
 
     async removeItem(kind, id) {

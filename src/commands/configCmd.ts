@@ -4,7 +4,7 @@ import { EXIT } from '../cli.js'
 import type { Config } from '../config.js'
 import type { Io } from '../output.js'
 
-const KEYS = ['host', 'owner', 'repo', 'branch', 'device', 'vault', 'item', 'secrets', 'excludes'] as const
+const KEYS = ['host', 'owner', 'repo', 'branch', 'device', 'vault', 'item', 'secrets', 'excludes', 'remote'] as const
 type Key = (typeof KEYS)[number]
 
 function isKey(k: string): k is Key {

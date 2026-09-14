@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSync, gather } from '../../src/engine.js'
 import { loadState } from '../../src/state.js'
-import { makeFakeCcSwitch, addSkill, addMcp, type FakeHome } from './fakeCcSwitch.js'
+import { makeFakeCcSwitch, addSkill, addMcp, addRepo, type FakeHome } from './fakeCcSwitch.js'
+import { readRepos } from '../../src/ccswitch/read.js'
 import { loadDatabaseSync } from '../../src/util/sqlite.js'
 import type { Config } from '../../src/config.js'
 import type { SyncOutcome } from '../../src/engine.js'
@@ -33,6 +34,9 @@ export interface Device {
   readSkill(dir: string): Promise<string | null>
   deleteSkill(dir: string): Promise<void>
   addMcpServer(id: string, config: unknown, apps?: string[]): void
+  addRepoRow(owner: string, name: string, branch?: string, enabled?: boolean): void
+  listRepoRows(): { owner: string; name: string; branch: string; enabled: boolean }[]
+  addUnmanagedSkillDir(dir: string, body: string): Promise<void>
 
   readRemoteFile(relPath: string): Promise<string | null>
   readState(): Promise<StateFile>
@@ -57,6 +61,26 @@ const list = (apps ?? '').split(',').filter(Boolean)
 const ALL = ['claude','codex','gemini','opencode','hermes','grokbuild']
 const d = new DatabaseSync(db)
 const sets = ALL.map((a) => \`enabled_\${a} = \${list.includes(a) ? 1 : 0}\`).join(', ')
+if (kind === 'repo') {
+  const [owner, rest] = id.split('/')
+  const [name] = (rest ?? '').split('@')
+  const branch = id.includes('@') ? id.split('@')[1] : 'main'
+  if (apps === 'remove') {
+    d.prepare('DELETE FROM skill_repos WHERE owner = ? AND name = ?').run(owner, name)
+  } else if (apps === 'enable' || apps === 'disable') {
+    d.prepare('UPDATE skill_repos SET enabled = ? WHERE owner = ? AND name = ?')
+      .run(apps === 'enable' ? 1 : 0, owner, name)
+  } else {
+    const existing = d.prepare('SELECT owner FROM skill_repos WHERE owner = ? AND name = ?').get(owner, name)
+    if (existing === undefined) {
+      d.prepare('INSERT INTO skill_repos (owner,name,branch,enabled) VALUES (?,?,?,1)').run(owner, name, branch)
+    } else {
+      d.prepare('UPDATE skill_repos SET branch = ? WHERE owner = ? AND name = ?').run(branch, owner, name)
+    }
+  }
+  d.close()
+  process.exit(0)
+}
 if (kind === 'skill') {
   const row = d.prepare('SELECT id FROM skills WHERE directory = ?').get(id)
   if (row === undefined) {
@@ -80,6 +104,7 @@ case "$1 $2" in
   "skills set-apps")         node "$HELPER" "$DB" skill "$3" "$5" ;;
   "mcp set-apps")            node "$HELPER" "$DB" mcp   "$3" "$5" ;;
   "skills sync")             : ;;
+  "skills repos")            node "$HELPER" "$DB" repo "$4" "$3" ;;
   "deeplink "*)              : ;;
   *)                         : ;;
 esac
@@ -145,6 +170,20 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
 
     addMcpServer(id, config_, apps = ['claude']) {
       addMcp(paths, id, config_, apps)
+    },
+
+    addRepoRow(owner, name, branch = 'main', enabled = true) {
+      addRepo(paths, owner, name, branch, enabled)
+    },
+
+    listRepoRows() {
+      return readRepos(paths)
+    },
+
+    async addUnmanagedSkillDir(dir, body) {
+      const d = join(paths.skillsDir, dir)
+      await mkdir(d, { recursive: true })
+      await writeFile(join(d, 'SKILL.md'), body)
     },
 
     async readRemoteFile(relPath) {

@@ -1,5 +1,6 @@
 import pc from 'picocolors'
 import { gather } from '../engine.js'
+import { unmanagedSkills } from '../ccswitch/read.js'
 import { buildPlan } from '../core/plan.js'
 import { narrowByDirection } from '../engine.js'
 import { emitJson, line } from '../output.js'
@@ -10,6 +11,14 @@ import type { Io } from '../output.js'
 export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
   const { resolutions } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  const unmanaged = unmanagedSkills(opts.paths)
+  for (const d of unmanaged) {
+    io.warnings.push(
+      `skills/${d} is not managed by cc-switch and will not sync — ` +
+      `adopt it with \`cc-switch skills import-from-apps ${d}\``,
+    )
+  }
 
   if (io.json) {
     emitJson('status', {
@@ -24,6 +33,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
         remote: r.remote?.contentHash ?? null,
       })),
       conflicts: plan.conflicts.map((c) => ({ kind: c.kind, id: c.id })),
+      unmanagedSkills: unmanaged,
     }, io)
     return 0
   }
@@ -31,6 +41,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
   const rows = summarize(plan)
   if (rows.length === 0) {
     line(pc.green('Everything is in sync.'), io)
+    for (const w of io.warnings) line(pc.yellow(`  ! ${w}`), io)
     return 0
   }
 
@@ -41,6 +52,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
     const mark = a.type === 'merge' ? pc.yellow('conflict') : pc.dim(a.type)
     line(`  ${mark.padEnd(24)} ${a.kind}/${a.id}`, io)
   }
+  for (const w of io.warnings) line(pc.yellow(`  ! ${w}`), io)
   line('', io)
   return 0
 }

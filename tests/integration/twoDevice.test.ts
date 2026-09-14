@@ -207,3 +207,47 @@ describe('two devices', () => {
     expect(await A.readSkill('shared')).toBe(await C.readSkill('shared'))
   })
 })
+
+describe('repositories and unmanaged skills', () => {
+  it('propagates a skill repository from A to B', async () => {
+    A.addRepoRow('anthropics', 'skills', 'main', true)
+    await A.sync()
+    expect(await A.readRemoteFile('repos/anthropics/skills.json')).toContain('"branch"')
+
+    await B.sync()
+    expect(B.listRepoRows()).toEqual([
+      { owner: 'anthropics', name: 'skills', branch: 'main', enabled: true },
+    ])
+  })
+
+  it('converges on repositories — a second sync plans nothing', async () => {
+    A.addRepoRow('a', 'b', 'main', true)
+    await A.sync()
+    const second = await A.sync()
+    expect(second.plan.actions).toHaveLength(0)
+    expect(second.pushed).toBe(false)
+  })
+
+  it('carries a non-default branch and the disabled flag', async () => {
+    A.addRepoRow('o', 'n', 'dev', false)
+    await A.sync()
+    await B.sync()
+    expect(B.listRepoRows()).toEqual([
+      { owner: 'o', name: 'n', branch: 'dev', enabled: false },
+    ])
+  })
+
+  it('reports a skill directory cc-switch does not manage instead of ignoring it', async () => {
+    await A.addUnmanagedSkillDir('stray', '---\nname: stray\ndescription: d\n---\nbody\n')
+    await A.writeSkill('managed', skill('managed', 'v1'))
+    await A.sync()
+
+    // The unmanaged directory is not pushed...
+    expect(await A.readRemoteFile('skills/stray/SKILL.md')).toBeNull()
+    expect(await A.readRemoteFile('skills/managed/SKILL.md')).toContain('v1')
+
+    // ...but it is visible rather than silently dropped.
+    const { unmanagedSkills } = await import('../../src/ccswitch/read.js')
+    expect(unmanagedSkills(A.paths)).toEqual(['stray'])
+  })
+})

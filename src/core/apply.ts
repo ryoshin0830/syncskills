@@ -141,6 +141,23 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         return 'done'
       }
 
+      if (kind === 'repo') {
+        const stored = await ctx.store.readItemJson('repo', id)
+        if (stored === null) throw new Error(`remote repos/${id}.json is missing from the store`)
+        const [owner, name] = id.split('/')
+        if (owner === undefined || name === undefined) {
+          throw new Error(`malformed repository id "${id}"; expected owner/name`)
+        }
+        const branch = String(stored.branch ?? 'main')
+        const enabled = stored.enabled === true
+        await ctx.writer.addRepo(owner, name, branch, enabled)
+        setBase(ctx.state, kind, id, {
+          contentHash: canonicalJsonHash({ branch, enabled }),
+          apps: [],
+        })
+        return 'done'
+      }
+
       return 'done'
     }
 
@@ -188,6 +205,18 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         return 'done'
       }
 
+      if (kind === 'repo') {
+        const row = resolution.local!.payload as {
+          owner: string; name: string; branch: string; enabled: boolean
+        }
+        const value = { branch: row.branch, enabled: row.enabled }
+        await ctx.store.writeItemJson('repo', id, value)
+        const side = { contentHash: canonicalJsonHash(value), apps: [] }
+        setBase(ctx.state, kind, id, side)
+        upsertEntry(ctx.manifest, kind, id, side, ctx.device)
+        return 'done'
+      }
+
       return 'done'
     }
 
@@ -207,6 +236,12 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         // Leave the base alone: the item is still here, so the next run must
         // see the same decision rather than believing the delete happened.
         if (outcome === 'pending') return 'pending'
+      } else if (kind === 'repo') {
+        const [owner, name] = id.split('/')
+        if (owner === undefined || name === undefined) {
+          throw new Error(`malformed repository id "${id}"; expected owner/name`)
+        }
+        await ctx.writer.removeRepo(owner, name)
       }
       setBase(ctx.state, kind, id, undefined)
       return 'done'
