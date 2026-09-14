@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, writeFile, chmod, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { treeHash, canonicalize, canonicalJsonHash } from '../../src/core/hash.js'
+import { walk } from '../../src/util/fs.js'
 
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'ss-hash-')) })
@@ -121,5 +122,27 @@ describe('treeHash', () => {
     const h = await treeHash(dir)
     expect(h.startsWith('sha256:')).toBe(true)
     expect(await treeHash(dir)).toBe(h)
+  }, 15_000)
+
+  it('hashes both of two symlinks that point at the same real directory', async () => {
+    const real = join(dir, 'real')
+    await mkdir(real)
+    await writeFile(join(real, 'x.md'), 'shared')
+    await mkdir(join(dir, 'a'))
+    await mkdir(join(dir, 'b'))
+    await symlink(real, join(dir, 'a', 'link1'))
+    await symlink(real, join(dir, 'b', 'link2'))
+    const entries: string[] = []
+    for await (const e of walk(dir)) entries.push(e.rel)
+    expect(entries).toContain('a/link1/x.md')
+    expect(entries).toContain('b/link2/x.md')
+  })
+
+  it('still terminates on a true cycle and is stable across runs', async () => {
+    await writeFile(join(dir, 'SKILL.md'), 'x')
+    await mkdir(join(dir, 'sub'))
+    await symlink(dir, join(dir, 'sub', 'loop'))
+    const h = await treeHash(dir)
+    expect(h).toBe(await treeHash(dir))
   }, 15_000)
 })

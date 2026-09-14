@@ -10,15 +10,16 @@ function isIgnored(name: string): boolean {
 
 export interface WalkEntry { abs: string; rel: string; mode: number }
 
-// `seen` holds the resolved real path of every directory already entered, so a
-// symlink cycle terminates here rather than at whatever depth the host OS
-// happens to enforce — otherwise the same tree hashes differently per machine.
+// A directory is skipped only when its real path already appears on the path
+// we took to reach it — that is what a cycle is. Two different symlinks to the
+// same real directory are not a cycle, and both are hashed; skipping the second
+// would silently drop its content from the hash.
 export async function* walk(
-  dir: string, base = dir, seen: Set<string> = new Set(),
+  dir: string, base = dir, ancestors: readonly string[] = [],
 ): AsyncGenerator<WalkEntry> {
   const real = await realpath(dir).catch(() => dir)
-  if (seen.has(real)) return
-  seen.add(real)
+  if (ancestors.includes(real)) return
+  const chain = [...ancestors, real]
 
   const entries = await readdir(dir, { withFileTypes: true })
   for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -38,7 +39,7 @@ export async function* walk(
     }
 
     if (st.isDirectory()) {
-      yield* walk(abs, base, seen)
+      yield* walk(abs, base, chain)
     } else if (st.isFile()) {
       yield { abs, rel: relative(base, abs).split(sep).join('/'), mode: st.mode }
     }
