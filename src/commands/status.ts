@@ -1,5 +1,5 @@
 import pc from 'picocolors'
-import { gather } from '../engine.js'
+import { gather, blankCredentials } from '../engine.js'
 import { unmanagedSkills, taggedMcpServers } from '../ccswitch/read.js'
 import { unsafeManifestIds } from '../store/manifest.js'
 import { buildPlan } from '../core/plan.js'
@@ -17,6 +17,17 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
     io.warnings.push(
       `mcp/${s.id} is missing ${Object.keys(s.env).sort().join(', ')} on this machine; ` +
       `the next sync restores them from 1Password`,
+    )
+  }
+
+  // Keys 1Password cannot fill either — with --no-secrets that is every key a
+  // pulled server has, and the result is a config that looks fine and fails.
+  const restorable = new Set(staleSecrets.map((s) => s.id))
+  const blanks = blankCredentials(opts.paths).filter((b) => !restorable.has(b.id))
+  for (const b of blanks) {
+    io.warnings.push(
+      `mcp/${b.id} has no value for ${b.keys.join(', ')} on this machine; ` +
+      `the server will start with an empty credential`,
     )
   }
 
@@ -66,6 +77,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
       untransferableTags: tagged,
       unsafeIds: unsafeLocalIds,
       staleSecrets: staleSecrets.map((s) => ({ id: s.id, keys: Object.keys(s.env).sort() })),
+      blankCredentials: blanks,
     }, io)
     return 0
   }

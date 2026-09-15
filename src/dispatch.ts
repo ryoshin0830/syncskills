@@ -30,10 +30,25 @@ const KIND_OF: Record<string, ItemKind> = {
   repo: 'repo', repos: 'repo',
 }
 
-function parseOnly(value: string | boolean | undefined): ItemKind[] | undefined {
-  if (typeof value !== 'string' || value === '') return undefined
-  const kinds = value.split(',').map((s) => KIND_OF[s.trim()]).filter((k): k is ItemKind => k !== undefined)
-  return kinds.length === 0 ? undefined : [...new Set(kinds)]
+/**
+ * Parse `--only`. A name that is not a kind is an error, not a reason to fall
+ * back to syncing everything: `--only skil` silently touching MCP servers and
+ * repositories is the opposite of what was asked for.
+ */
+export function parseOnly(value: string | boolean | undefined): ItemKind[] | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error('--only needs a value: skills, mcp or repos (comma separated)')
+  }
+  const names = value.split(',').map((s) => s.trim()).filter((s) => s !== '')
+  const bad = names.filter((n) => KIND_OF[n] === undefined)
+  if (bad.length > 0) {
+    throw new Error(
+      `--only: unknown kind${bad.length > 1 ? 's' : ''} ${bad.map((b) => `"${b}"`).join(', ')} ` +
+      `— expected skills, mcp or repos`,
+    )
+  }
+  return [...new Set(names.map((n) => KIND_OF[n]!))]
 }
 
 function parseAgent(value: string | boolean | undefined): EngineOptions['mergeAgent'] {
@@ -65,6 +80,18 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     return EXIT.ERROR
   }
 
+  // Argument errors are reported before anything about the machine's state: a
+  // misspelled kind is wrong whether or not this device has been set up.
+  let only: ItemKind[] | undefined
+  try {
+    only = parseOnly(args.flags.only)
+  } catch (e) {
+    const msg = (e as Error).message
+    if (io.json) emitJsonError(args.command, msg, io)
+    else process.stderr.write(`syncskills: ${msg}\n`)
+    return EXIT.ERROR
+  }
+
   if (args.command === 'completion') {
     return completionCommand(args.positionals[0], io)
   }
@@ -90,7 +117,14 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
 
   if (args.command === 'init') {
     const { runInit } = await import('./commands/init.js')
-    await runInit({ configDir: dir, flags: args.flags, io })
+    try {
+      await runInit({ configDir: dir, flags: args.flags, io })
+    } catch (e) {
+      const msg = (e as Error).message
+      if (io.json) emitJsonError('init', msg, io)
+      else process.stderr.write(`syncskills: ${msg}\n`)
+      return EXIT.ERROR
+    }
     return EXIT.OK
   }
 
@@ -108,7 +142,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     configDir: dir,
     config,
     paths,
-    ...(parseOnly(args.flags.only) === undefined ? {} : { only: parseOnly(args.flags.only)! }),
+    ...(only === undefined ? {} : { only }),
     mergeAgent: parseAgent(args.flags['merge-agent']),
     useSecrets,
     dryRun: args.flags['dry-run'] === true,

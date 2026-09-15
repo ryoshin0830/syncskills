@@ -56,6 +56,40 @@ describe('built CLI', () => {
     expect((JSON.parse(r.stdout) as { error: string }).error).toMatch(/unknown command/)
   })
 
+  it('prints its version', async () => {
+    const r = await run('node', ['dist/cli.js', '--version'])
+    expect(r.code).toBe(0)
+    expect(r.stdout.trim()).toMatch(/^syncskills \d+\.\d+\.\d+/)
+  })
+
+  /**
+   * The dangerous case: a mistyped --dry-run used to be dropped silently, and
+   * the run went ahead for real.
+   */
+  it('exits 1 on a mistyped flag instead of ignoring it', async () => {
+    for (const typo of ['--dry-runn', '--yess', '--no-secretss']) {
+      const r = await run('node', ['dist/cli.js', 'sync', typo])
+      expect(r.code, typo).toBe(1)
+      expect(r.stderr, typo).toMatch(/unknown flag/)
+    }
+  }, 30_000)
+
+  it('reports a mistyped flag through the JSON envelope too', async () => {
+    const r = await run('node', ['dist/cli.js', 'sync', '--jsonn', '--json'])
+    expect(r.code).toBe(1)
+    const env = JSON.parse(r.stdout) as { ok: boolean; error: string }
+    expect(env.ok).toBe(false)
+    expect(env.error).toMatch(/unknown flag/)
+  })
+
+  it('exits 1 on an unknown --only kind rather than syncing everything', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ss-only-'))
+    const r = await run('node', ['dist/cli.js', 'sync', '--only', 'skil'], {
+      env: { SYNCSKILLS_CONFIG_DIR: join(dir, 'nothing-here') },
+    })
+    expect(r.code).toBe(1)
+  })
+
   it('emits a shell completion script for each supported shell', async () => {
     for (const shell of ['zsh', 'bash', 'fish']) {
       const r = await run('node', ['dist/cli.js', 'completion', shell])

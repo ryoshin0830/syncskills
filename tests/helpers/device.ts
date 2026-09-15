@@ -15,6 +15,12 @@ import type { EngineOptions } from '../../src/engine.js'
 
 export { makeBareRemote } from './bareRemote.js'
 
+export interface CapturedRun {
+  code: number
+  text: string
+  envelope: { ok: boolean; command: string; data: unknown; warnings: string[] } | null
+}
+
 /**
  * One simulated machine: its own cc-switch home, its own syncskills config
  * directory, and a stub cc-switch binary that applies matrix changes straight
@@ -30,6 +36,8 @@ export interface Device {
   sync(over?: Partial<EngineOptions>): Promise<SyncOutcome>
   push(): Promise<SyncOutcome>
   pull(): Promise<SyncOutcome>
+  /** Run the `sync` COMMAND, capturing what a user or a script would see. */
+  runSyncCommand(o?: { json?: boolean; dryRun?: boolean }): Promise<CapturedRun>
 
   writeSkill(dir: string, body: string, apps?: string[]): Promise<void>
   readSkill(dir: string): Promise<string | null>
@@ -44,6 +52,7 @@ export interface Device {
   addUnmanagedSkillDir(dir: string, body: string): Promise<void>
   setSkillApps(dir: string, apps: string[]): void
   readSkillApps(dir: string): string[]
+  listSkillRows(): { directory: string; apps: string[] }[]
 
   readRemoteFile(relPath: string): Promise<string | null>
   readState(): Promise<StateFile>
@@ -76,7 +85,9 @@ case "$1 $2" in
     if [ "$1" = "deeplink" ]; then node "$HELPER" "$DB" deeplink "$2"; fi
     ;;
 esac
-exit 0
+# Propagate the helper's status. Swallowing it would let the stub accept what
+# the real binary refuses.
+exit $?
 `)
   await chmod(bin, 0o755)
   return bin
@@ -111,6 +122,34 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
     name, configDir, paths, ccBin,
 
     sync: (over) => runSync(options(over)),
+
+    async runSyncCommand({ json = false, dryRun = false } = {}) {
+      const { syncCommand } = await import('../../src/commands/sync.js')
+      const written: string[] = []
+      const original = process.stdout.write.bind(process.stdout)
+      // picocolors reads isTTY once at import time; in vitest it is off, so the
+      // captured text carries no escape codes.
+      process.stdout.write = ((chunk: string | Uint8Array) => {
+        written.push(String(chunk))
+        return true
+      }) as typeof process.stdout.write
+      let code: number
+      try {
+        code = await syncCommand(
+          options({ dryRun }),
+          { json, quiet: false, verbose: false, warnings: [] },
+          'sync',
+        )
+      } finally {
+        process.stdout.write = original
+      }
+      const text = written.join('')
+      return {
+        code,
+        text,
+        envelope: json ? (JSON.parse(text) as CapturedRun['envelope']) : null,
+      }
+    },
     push: () => runSync(options({ direction: 'push' })),
     pull: () => runSync(options({ direction: 'pull' })),
 
@@ -203,6 +242,10 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
     readSkillApps(dir) {
       const row = readSkills(paths).find((r) => r.directory === dir)
       return row === undefined ? [] : row.apps
+    },
+
+    listSkillRows() {
+      return readSkills(paths).map((r) => ({ directory: r.directory, apps: r.apps }))
     },
 
     async addUnmanagedSkillDir(dir, body) {

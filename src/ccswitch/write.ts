@@ -68,6 +68,39 @@ export function createWriter(opts: {
 
   let pendingReason: string | undefined
 
+  /**
+   * cc-switch's import paths refuse an empty app list, but "enabled nowhere" is
+   * a state the user can reach in its own UI and must therefore be able to
+   * travel. The row is created with one harness on and the matrix is cleared
+   * afterwards — the order matters, because the import is what creates the row.
+   */
+  function seedApps(apps: App[]): App[] {
+    return apps.length === 0 ? [SEED_APP] : apps
+  }
+
+  async function zeroMatrix(
+    table: 'skills' | 'mcp_servers', keyColumn: string, key: string,
+  ): Promise<void> {
+    const ok = await zeroAppMatrix(opts.paths, table, keyColumn, key, isRunning)
+      .catch((e: Error) => {
+        pendingReason = e.message
+        return false
+      })
+    if (!ok) throw new Error(pendingReason ?? `could not disable "${key}" everywhere`)
+  }
+
+  async function putMcpApps(id: string, apps: App[]): Promise<void> {
+    // cc-switch refuses an empty list ("Please provide at least one app"),
+    // so disabling the last harness has to go through the database.
+    if (apps.length === 0) return zeroMatrix('mcp_servers', 'id', id)
+    await cc(['mcp', 'set-apps', id, '--apps', apps.join(',')], 'mcp set-apps')
+  }
+
+  async function putSkillApps(dir: string, apps: App[]): Promise<void> {
+    if (apps.length === 0) return zeroMatrix('skills', 'directory', dir)
+    await cc(['skills', 'set-apps', dir, '--apps', apps.join(',')], 'skills set-apps')
+  }
+
   async function removeMcp(id: string): Promise<DeleteOutcome> {
     pendingReason = undefined
     if (await ptyDelete(bin, id, env).catch(() => false)) return 'deleted'
@@ -93,7 +126,8 @@ export function createWriter(opts: {
 
   return {
     async importMcp(id, config, apps) {
-      await cc(['deeplink', buildDeeplink(id, config, apps)], 'deeplink import')
+      await cc(['deeplink', buildDeeplink(id, config, seedApps(apps))], 'deeplink import')
+      if (apps.length === 0) await putMcpApps(id, apps)
     },
 
     async importMcpWithSecrets(id, config, env, apps) {
@@ -113,11 +147,19 @@ export function createWriter(opts: {
         if (removed === 'pending') return 'pending'
       }
 
-      await cc(['deeplink', buildDeeplink(id, blanked, apps)], 'deeplink import')
+      await cc(['deeplink', buildDeeplink(id, blanked, seedApps(apps))], 'deeplink import')
 
       // set-apps replaces the matrix outright, which the additive import cannot
-      // do — without this a harness disabled elsewhere is never disabled here.
-      await cc(['mcp', 'set-apps', id, '--apps', apps.join(',')], 'mcp set-apps')
+      // do — without this a harness disabled elsewhere is never disabled here,
+      // and a server disabled everywhere keeps the seed harness it was created
+      // with. Reported as pending rather than thrown: the row exists now, so
+      // the next run must see the real state rather than a recorded base.
+      try {
+        await putMcpApps(id, apps)
+      } catch (e) {
+        pendingReason = (e as Error).message
+        return 'pending'
+      }
 
       // Credentials are the one thing that cannot travel through a deep link
       // without landing on a command line, so they go through the database.
@@ -146,35 +188,17 @@ export function createWriter(opts: {
 
     lastPendingReason: () => pendingReason,
 
-    async setMcpApps(id, apps) {
-      // cc-switch refuses an empty list ("Please provide at least one app"),
-      // so disabling the last harness has to go through the database.
-      if (apps.length === 0) {
-        const ok = await zeroAppMatrix(opts.paths, 'mcp_servers', 'id', id, isRunning).catch((e: Error) => {
-          pendingReason = e.message
-          return false
-        })
-        if (!ok) throw new Error(pendingReason ?? `could not disable "${id}" everywhere`)
-        return
-      }
-      await cc(['mcp', 'set-apps', id, '--apps', apps.join(',')], 'mcp set-apps')
-    },
+    setMcpApps: putMcpApps,
 
     async importSkill(dir, apps) {
-      await cc(['skills', 'import-from-apps', dir, '--apps', apps.join(',')], 'skills import-from-apps')
+      await cc(
+        ['skills', 'import-from-apps', dir, '--apps', seedApps(apps).join(',')],
+        'skills import-from-apps',
+      )
+      if (apps.length === 0) await putSkillApps(dir, apps)
     },
 
-    async setSkillApps(dir, apps) {
-      if (apps.length === 0) {
-        const ok = await zeroAppMatrix(opts.paths, 'skills', 'directory', dir, isRunning).catch((e: Error) => {
-          pendingReason = e.message
-          return false
-        })
-        if (!ok) throw new Error(pendingReason ?? `could not disable "${dir}" everywhere`)
-        return
-      }
-      await cc(['skills', 'set-apps', dir, '--apps', apps.join(',')], 'skills set-apps')
-    },
+    setSkillApps: putSkillApps,
 
     async syncSkills() {
       await cc(['skills', 'sync'], 'skills sync')
@@ -202,6 +226,9 @@ export function createWriter(opts: {
     deleteMcp: removeMcp,
   }
 }
+
+/** The harness an item is created under when it is meant to be enabled nowhere. */
+const SEED_APP: App = 'claude'
 
 const APP_COLUMNS = [
   'enabled_claude', 'enabled_codex', 'enabled_gemini',

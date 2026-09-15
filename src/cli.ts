@@ -5,6 +5,21 @@ const VALUE_FLAGS = new Set([
   'merge-agent', 'only', 'profile', 'config', 'host', 'repo', 'vault', 'device',
 ])
 
+/**
+ * Every flag the CLI understands. Anything else is refused rather than ignored:
+ * a silently dropped `--dry-runn` is a real push, and `--no-secretss` is a
+ * credential in git. A typo must never be the difference between a preview and
+ * an irreversible action.
+ */
+export const KNOWN_FLAGS = new Set([
+  ...VALUE_FLAGS, ...Object.values(SHORT),
+  'json', 'yes', 'verbose', 'quiet', 'help', 'version', 'dry-run', 'no-secrets', 'no-tui',
+])
+
+export function unknownFlags(flags: Record<string, string | boolean>): string[] {
+  return Object.keys(flags).filter((f) => !KNOWN_FLAGS.has(f)).sort()
+}
+
 export interface ParsedArgs {
   command: string
   positionals: string[]
@@ -47,9 +62,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { command: command === '' ? 'tui' : command, positionals, flags }
 }
 
+import { readFileSync } from 'node:fs'
 import { helpFor, ROOT_HELP } from './help.js'
-import { pathToFileURL } from 'node:url'
+import { emitJsonError } from './output.js'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { silenceSqliteExperimentalWarning } from './util/sqlite.js'
+
+/**
+ * Read the version off the package manifest rather than duplicating it in a
+ * constant that drifts. The bundle lives in dist/, and the sources in src/, so
+ * the manifest is one level up from either.
+ */
+export function packageVersion(): string {
+  try {
+    const path = fileURLToPath(new URL('../package.json', import.meta.url))
+    const pkg = JSON.parse(readFileSync(path, 'utf8')) as { version?: unknown }
+    return typeof pkg.version === 'string' ? pkg.version : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
 
 export async function main(argv: string[]): Promise<number> {
   // node:sqlite prints an ExperimentalWarning the first time it is touched.
@@ -58,6 +90,23 @@ export async function main(argv: string[]): Promise<number> {
   silenceSqliteExperimentalWarning()
 
   const args = parseArgs(argv)
+
+  const unknown = unknownFlags(args.flags)
+  if (unknown.length > 0) {
+    const names = unknown.map((f) => `"--${f}"`).join(', ')
+    const msg = `unknown flag${unknown.length > 1 ? 's' : ''} ${names} — run \`syncskills --help\``
+    if (args.flags.json === true) {
+      emitJsonError(args.command, msg, { json: true, quiet: false, verbose: false, warnings: [] })
+    } else {
+      process.stderr.write(`syncskills: ${msg}\n`)
+    }
+    return EXIT.ERROR
+  }
+
+  if (args.flags.version === true) {
+    process.stdout.write(`syncskills ${packageVersion()}\n`)
+    return EXIT.OK
+  }
 
   if (args.flags.help === true || args.command === 'help') {
     const topic = args.command === 'help' ? args.positionals[0] : args.command

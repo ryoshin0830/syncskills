@@ -122,7 +122,13 @@ export function stripSecrets(config: Record<string, unknown>): {
   if (env !== null && typeof env === 'object' && !Array.isArray(env)) {
     const marked: Record<string, unknown> = {}
     for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
-      secrets[k] = String(v)
+      // String() on an object yields "[object Object]", which would replace the
+      // user's value with a corrupted one on every other machine.
+      secrets[k] =
+        typeof v === 'string' ? v
+        : v === null || v === undefined ? ''
+        : typeof v === 'object' ? JSON.stringify(v)
+        : String(v)
       marked[k] = { secret: true }
     }
     sanitized.env = marked

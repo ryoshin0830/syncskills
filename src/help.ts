@@ -3,10 +3,11 @@ const GLOBAL = `GLOBAL FLAGS
   --yes, -y              assume yes; never prompt
   --dry-run              show what would happen; change nothing
   --only <kinds>         limit to skills, mcp or repos (comma separated)
-  --merge-agent <name>   claude | codex | none   (default: auto)
+  --merge-agent <name>   claude | codex | none   (default: auto; interactive only)
   --no-secrets           do not touch 1Password
   --profile <name>       use an alternate configuration
   --config <dir>         configuration directory (default: ~/.config/syncskills)
+  --version              print the version
   --verbose, -v          more detail
   --quiet, -q            errors only
   --no-tui               never enter interactive mode
@@ -39,6 +40,12 @@ EXIT CODES
   1  error
   2  unresolved conflicts, or an action awaiting manual intervention
   3  not initialized — run \`syncskills init\`
+
+MERGING
+  Conflicts are merged in the interactive interface only, where the merged
+  result is shown before it is written. \`sync\`, \`push\` and \`pull\` report a
+  conflict and leave the item alone; run \`syncskills\` with no arguments to
+  resolve one. \`--merge-agent\` chooses the agent for that interactive merge.
 
 EXAMPLES
   syncskills                       open the interactive interface
@@ -84,16 +91,20 @@ FLAGS
   --yes, -y            apply without prompting
   --dry-run            show the plan and stop
   --only <kinds>       skills, mcp, repos
-  --merge-agent <name> claude | codex | none
   --json               machine-readable result
 
+Conflicts are NOT merged here. This command never rewrites an item out of two
+versions on its own; it reports the conflict and moves on, leaving both sides
+intact. Run \`syncskills\` with no arguments to merge one interactively, where
+the result is shown before it is written.
+
 EXIT CODES
-  2 when a conflict could not be merged automatically.
+  2 when an item is in conflict, or is waiting for you to finish it by hand.
 
 EXAMPLES
   syncskills sync
   syncskills sync --yes --json
-  syncskills sync --only mcp --merge-agent codex`,
+  syncskills sync --only mcp`,
 
   status: `syncskills status — show what differs.
 

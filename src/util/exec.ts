@@ -21,6 +21,11 @@ export function run(bin: string, args: string[], opts: RunOptions = {}): Promise
     child.stderr.on('data', (d) => { stderr += d })
     child.on('error', reject)
     child.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }))
+    // A child that exits before it has read its stdin makes the write fail with
+    // EPIPE. Without a listener that is an unhandled 'error' event, which takes
+    // the whole CLI down; the child's exit code is the answer we actually want,
+    // so the write failure is swallowed and 'close' still resolves the promise.
+    child.stdin.on('error', () => {})
     if (opts.input !== undefined) child.stdin.write(opts.input)
     child.stdin.end()
   })

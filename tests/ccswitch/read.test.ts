@@ -94,6 +94,23 @@ describe('stripSecrets', () => {
     expect(secrets).toEqual({})
     expect(sanitized.env).toBeNull()
   })
+
+  /**
+   * A value cc-switch stored as something other than a string used to become
+   * the literal text "[object Object]" on every other machine.
+   */
+  it('does not corrupt a non-string value into [object Object]', () => {
+    const { secrets } = stripSecrets({
+      command: 'x',
+      env: { OBJ: { a: 1 }, ARR: [1, 2], NUM: 3000, BOOL: true, NIL: null },
+    })
+    expect(secrets.OBJ).toBe('{"a":1}')
+    expect(secrets.ARR).toBe('[1,2]')
+    expect(secrets.NUM).toBe('3000')
+    expect(secrets.BOOL).toBe('true')
+    expect(secrets.NIL).toBe('')
+    expect(Object.values(secrets)).not.toContain('[object Object]')
+  })
 })
 
 describe('localSkillSides', () => {

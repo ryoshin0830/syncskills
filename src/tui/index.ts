@@ -74,6 +74,18 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
   // ---- conflicts first: nothing else is applied until these are settled ----
   const stillUnresolved: Action[] = []
+  let resolvedAny = false
+
+  /** Put the state and manifest built so far where the other devices can see it. */
+  async function publish(applied: number): Promise<boolean> {
+    if (opts.useSecrets) await secrets.write(blob)
+    await store.writeManifest(manifest)
+    const ok = await store.commitAndPush(
+      `sync from ${opts.config.device} (${applied} change(s))`,
+    )
+    await saveState(opts.configDir, state)
+    return ok
+  }
 
   if (plan.conflicts.length > 0) {
     const agent = await pickAgent(opts.mergeAgent)
@@ -174,6 +186,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       await rm(store.itemDir('skill', c.id), { recursive: true, force: true })
       await copyTree(localDir, store.itemDir('skill', c.id))
 
+      resolvedAny = true
       p.log.success(`${c.id} resolved — both versions kept in ${backup}`)
     }
   }
@@ -185,8 +198,16 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       initialValue: true,
     })
     if (go !== true) {
-      p.outro('Nothing applied.')
-      return EXIT.OK
+      // The merges above already wrote to this machine. Declining the REST of
+      // the plan must not throw that away: without publishing here the resolved
+      // item has no base and no manifest entry, and the next run sees the same
+      // conflict again.
+      if (resolvedAny && !opts.dryRun) {
+        const pushed = await publish(0)
+        p.log.info(pushed ? 'Merge results published.' : 'Merge results recorded.')
+      }
+      p.outro('Nothing else applied.')
+      return stillUnresolved.length > 0 ? EXIT.CONFLICT : EXIT.OK
     }
   }
 
@@ -210,15 +231,11 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
     p.log.warn(`${a.kind}/${a.id} needs you to finish it by hand`)
   }
 
-  if (result.failed.length === 0 && !opts.dryRun) {
+  if (!opts.dryRun) {
+    // Publish the successes even when something failed; see runSync.
     const pspin = p.spinner()
     pspin.start('Publishing')
-    if (opts.useSecrets) await secrets.write(blob)
-    await store.writeManifest(manifest)
-    const pushed = await store.commitAndPush(
-      `sync from ${opts.config.device} (${result.applied.length} change(s))`,
-    )
-    await saveState(opts.configDir, state)
+    const pushed = await publish(result.applied.length)
     pspin.stop(pushed ? 'Published' : 'Nothing to publish')
   }
 

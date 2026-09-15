@@ -38,6 +38,9 @@ home Mac ──┘         (skills, MCP,          │
   and identically on every machine. Only genuine overlap reaches an AI agent
   (`claude -p` or `codex exec`), which is asked to preserve both contributions. Nothing it
   returns is written unless it validates, and both original versions are saved first.
+  Merging happens in the interactive interface only — run `npx syncskills` with no
+  arguments — where the merged result is shown to you before it is written. `sync`,
+  `push` and `pull` report a conflict, leave both sides intact, and exit 2.
 - **No secrets in git, ever.** MCP `env` values live in a single 1Password secure note
   reached with a service-account token. The repository holds key names only. Every file
   staged for a push is scanned for credentials as a backstop.
@@ -101,7 +104,7 @@ For each item, with `B` = what both sides last agreed on, `L` = this machine,
 | — | — | X | pull, it is new there |
 | A | — | A | delete on the remote too |
 | A | A | — | delete here too |
-| A | **X** | **Y** | **conflict** → merge, keeping both |
+| A | **X** | **Y** | **conflict** → reported; merge it interactively, keeping both |
 | A | — | **Y** | **conflict** — you deleted it, they changed it |
 
 The app matrix — which harnesses each item is enabled for — resolves separately, so a
@@ -144,12 +147,20 @@ esac
 --yes, -y              assume yes; never prompt
 --dry-run              show what would happen; change nothing
 --only <kinds>         skills, mcp, repos
---merge-agent <name>   claude | codex | none   (default: auto)
+--merge-agent <name>   claude | codex | none   (default: auto; interactive only)
 --no-secrets           do not touch 1Password
 --profile <name>       a second repository/config set
 --config <dir>         configuration directory
+--version              print the version
 --verbose, --quiet, --no-tui, --help
 ```
+
+An unrecognised flag is refused rather than ignored, so a mistyped `--dry-run` cannot
+turn a preview into a real push.
+
+Without 1Password (`--no-secrets`, or `secrets: false`), MCP key names still sync but
+their values do not. The receiving machine gets the server with empty values and says so
+in `status` and after each `sync`; fill them in there, or turn 1Password back on.
 
 ## When a merge goes wrong
 
@@ -161,7 +172,8 @@ npx syncskills conflicts restore <id>          # put one back
 ```
 
 Every apply also snapshots the cc-switch database and your whole skills tree to
-`~/.config/syncskills/backups/<timestamp>/` first.
+`~/.config/syncskills/backups/<timestamp>/` first. A `--dry-run` writes nothing at all,
+backups included.
 
 ## Where things live
 

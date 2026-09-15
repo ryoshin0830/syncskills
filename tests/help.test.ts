@@ -41,6 +41,27 @@ describe('help', () => {
     }
   })
 
+  /**
+   * `--merge-agent` only reaches the interactive interface. Advertising it on
+   * `sync` told people it would merge, when it always reported exit 2 instead.
+   */
+  it('does not offer --merge-agent on the non-interactive commands', () => {
+    for (const c of ['sync', 'push', 'pull']) {
+      expect(helpFor(c), `${c} still advertises --merge-agent`).not.toMatch(/--merge-agent/)
+    }
+  })
+
+  it('says where merging actually happens', () => {
+    expect(ROOT_HELP).toMatch(/MERGING/)
+    expect(ROOT_HELP).toMatch(/interactive/)
+    expect(helpFor('sync')).toMatch(/NOT merged here/)
+    expect(helpFor('sync')).toMatch(/no arguments/)
+  })
+
+  it('documents --version, which npx users reach for first', () => {
+    expect(ROOT_HELP).toMatch(/--version/)
+  })
+
   it('falls back to the root help for an unknown command', () => {
     expect(helpFor('nope')).toBe(ROOT_HELP)
   })

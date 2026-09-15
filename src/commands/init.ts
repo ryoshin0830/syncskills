@@ -48,6 +48,29 @@ function asString(v: unknown): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined
 }
 
+/**
+ * Ctrl-C at a @clack prompt resolves with a cancel symbol rather than
+ * rejecting. Unchecked, that symbol is stringified and written into the
+ * configuration as the device name.
+ */
+class Cancelled extends Error {
+  constructor() { super('setup cancelled') }
+}
+
+function answer<T>(value: T | symbol): T {
+  if (p.isCancel(value)) throw new Cancelled()
+  return value as T
+}
+
+/** Split `owner/name`, refusing anything else rather than guessing a half. */
+export function parseRepoSlug(spec: string): { owner: string; repo: string } {
+  const parts = spec.trim().split('/')
+  if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+    throw new Error(`repository must be written as owner/name; got "${spec}"`)
+  }
+  return { owner: parts[0]!, repo: parts[1]! }
+}
+
 export async function runInit(opts: {
   configDir: string
   flags: Record<string, string | boolean>
@@ -73,31 +96,29 @@ export async function runInit(opts: {
         hosts[0]!
       : hosts.length === 1 || nonInteractive
         ? hosts.find((h) => h.active) ?? hosts[0]!
-        : ((await p.select({
+        : answer<GhHost>(await p.select({
             message: 'Which GitHub host and account?',
             options: hosts.map((h) => ({
               value: h,
               label: `${h.host} — ${h.login}${h.active ? ' (active)' : ''}`,
             })),
-          })) as GhHost)
+          }))
 
   const repoAnswer =
     asString(flags.repo) ??
     (nonInteractive
       ? `${chosen.login}/syncskills`
-      : String(await p.text({
+      : answer<string>(await p.text({
           message: 'Repository to store skills and MCP servers',
           initialValue: `${chosen.login}/syncskills`,
         })))
-  const [ownerPart, repoPart] = repoAnswer.split('/')
-  const owner = ownerPart ?? chosen.login
-  const repo = repoPart ?? 'syncskills'
+  const { owner, repo } = parseRepoSlug(repoAnswer)
 
   const device =
     asString(flags.device) ??
     (nonInteractive
       ? hostname()
-      : String(await p.text({ message: 'Name for this device', initialValue: hostname() })))
+      : answer<string>(await p.text({ message: 'Name for this device', initialValue: hostname() })))
 
   const useSecrets = flags['no-secrets'] !== true
   let vault = 'agent'
@@ -108,7 +129,7 @@ export async function runInit(opts: {
       asString(flags.vault) ??
       (nonInteractive
         ? 'agent'
-        : String(await p.text({
+        : answer<string>(await p.text({
             message: '1Password vault holding the secret item',
             initialValue: 'agent',
           })))
@@ -117,7 +138,7 @@ export async function runInit(opts: {
       asString(process.env.SYNCSKILLS_OP_TOKEN) ??
       (nonInteractive
         ? ''
-        : String(await p.password({
+        : answer<string>(await p.password({
             message: '1Password service-account token (stored locally, mode 0600)',
           })))
 

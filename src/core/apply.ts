@@ -87,7 +87,9 @@ export async function applyPlan(plan: Plan, ctx: ApplyContext): Promise<ApplyRes
   const result: ApplyResult = { applied: [], failed: [], pending: [], backupDir: null }
   if (!ctx.dryRun) await recordAgreedBases(plan, ctx)
   if (plan.actions.length === 0) return result
-  result.backupDir = await snapshot(ctx)
+  // A dry run is described as changing nothing, and a backup is a change: it
+  // copies the database — credentials included — and every skill directory.
+  if (!ctx.dryRun) result.backupDir = await snapshot(ctx)
 
   let touchedSkills = false
 
@@ -106,9 +108,13 @@ export async function applyPlan(plan: Plan, ctx: ApplyContext): Promise<ApplyRes
       }
     } catch (e) {
       result.failed.push({ action, error: (e as Error).message })
-      // Stop at the first failure. Everything applied so far is recorded in
-      // state, so the next run resolves from reality rather than from a guess.
-      break
+      // Carry on with the rest. Actions are independent per item and each one
+      // records its own base, so a failure here costs only that item. Stopping
+      // would be worse than it sounds: the plan is sorted deterministically, so
+      // one item that fails every time would block everything ordered after it
+      // on every future run, and the only way out would be editing the config
+      // by hand.
+      continue
     }
   }
 

@@ -195,3 +195,64 @@ describe('credential repair and the empty matrix', () => {
     await expect(w.setMcpApps('o', [])).rejects.toThrow(/cc-switch is running/)
   })
 })
+
+describe('importing something that is enabled nowhere', () => {
+  let stub: Stub
+  let f: FakeHome
+  const stopped = async () => false
+  const running = async () => true
+
+  beforeEach(async () => {
+    stub = await makeStubBin('cc-switch')
+    f = await makeFakeCcSwitch()
+  })
+
+  /**
+   * cc-switch refuses `--apps ''` everywhere, so an item disabled in every
+   * harness cannot be imported directly. It used to throw — after the existing
+   * row had already been deleted, which lost the server outright.
+   */
+  it('never asks cc-switch to accept an empty app list', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await w.importMcp('o', { type: 'stdio', command: 'x' }, [])
+
+    const calls = (await stub.calls()).join('\n')
+    expect(calls).not.toMatch(/--apps\s*$/m)
+    const url = calls.split(/\s+/).find((t) => t.startsWith('ccswitch://'))!
+    expect(new URL(url).searchParams.get('apps')).toBeTruthy()
+  })
+
+  it('leaves the imported server disabled everywhere', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    // The stub binary does not write rows, so the row stands in for what the
+    // deep link would have created.
+    addMcp(f, 'o', { type: 'stdio', command: 'x' }, ['claude', 'codex'])
+
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await w.importMcp('o', { type: 'stdio', command: 'x' }, [])
+
+    const { readMcp } = await import('../../src/ccswitch/read.js')
+    expect(readMcp(f)[0]!.apps).toEqual([])
+  })
+
+  it('imports a skill that is enabled nowhere', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await w.importSkill('quiet', [])
+
+    const calls = await stub.calls()
+    expect(calls[0]).toMatch(/^skills import-from-apps quiet --apps \S+$/)
+    expect(calls.join('\n')).not.toMatch(/--apps\s*$/m)
+  })
+
+  it('reports pending rather than throwing when the matrix cannot be cleared', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x' }, ['claude'])
+
+    // cc-switch is live, so the database is off limits; the import already
+    // happened, so the caller must not record a base for it.
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: running })
+    const outcome = await w.importMcpWithSecrets('o', { type: 'stdio', command: 'x' }, {}, [])
+    expect(outcome).toBe('pending')
+    expect(w.lastPendingReason()).toMatch(/cc-switch is running/)
+  })
+})

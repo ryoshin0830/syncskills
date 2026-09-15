@@ -5,9 +5,21 @@ const ALL = ['claude', 'codex', 'gemini', 'opencode', 'hermes', 'grokbuild']
 const d = new DatabaseSync(db)
 const setsFor = (list) => ALL.map((a) => 'enabled_' + a + ' = ' + (list.includes(a) ? 1 : 0)).join(', ')
 
+// Faithful to the real binary: every path that takes an app list rejects an
+// empty one with "Please provide at least one app". Tolerating it here would
+// hide exactly the failure this stub exists to reproduce.
+const requireApps = (list) => {
+  if (list.length === 0) {
+    console.error('Please provide at least one app')
+    d.close()
+    process.exit(1)
+  }
+  return list
+}
+
 if (kind === 'deeplink') {
   const url = new URL(arg1)
-  const apps = (url.searchParams.get('apps') ?? '').split(',').filter(Boolean)
+  const apps = requireApps((url.searchParams.get('apps') ?? '').split(',').filter(Boolean))
   const doc = JSON.parse(Buffer.from(url.searchParams.get('config'), 'base64url').toString('utf8'))
   for (const [sid, cfg] of Object.entries(doc.mcpServers)) {
     const row = d.prepare('SELECT id FROM mcp_servers WHERE id = ?').get(sid)
@@ -43,7 +55,7 @@ if (kind === 'deeplink') {
     }
   }
 } else if (kind === 'skill') {
-  const list = (arg2 ?? '').split(',').filter(Boolean)
+  const list = requireApps((arg2 ?? '').split(',').filter(Boolean))
   const row = d.prepare('SELECT id FROM skills WHERE directory = ?').get(arg1)
   if (row === undefined) {
     const cols = ALL.map((a) => 'enabled_' + a).join(',')
@@ -58,7 +70,7 @@ if (kind === 'deeplink') {
   // The real binary prints this, and the writer greps for it.
   console.log("Deleted MCP server '" + arg1 + "'")
 } else if (kind === 'mcp') {
-  const list = (arg2 ?? '').split(',').filter(Boolean)
+  const list = requireApps((arg2 ?? '').split(',').filter(Boolean))
   d.prepare('UPDATE mcp_servers SET ' + setsFor(list) + ' WHERE id = ?').run(arg1)
 }
 

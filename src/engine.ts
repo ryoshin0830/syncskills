@@ -26,17 +26,28 @@ export type Direction = 'both' | 'push' | 'pull'
 const OUTBOUND = new Set(['push-content', 'delete-remote'])
 const INBOUND = new Set(['pull-content', 'delete-local'])
 
+// A matrix-only change has a direction of its own, held separately from the
+// content decision. Without consulting it, `push` would take the remote's
+// enablement and `pull` would publish this machine's.
+const APPS_OUTBOUND = new Set(['PUSH', 'PUSH_NEW', 'DELETE_REMOTE'])
+const APPS_INBOUND = new Set(['PULL', 'PULL_NEW', 'DELETE_LOCAL'])
+
 /**
  * Narrow a plan to one direction. The resolver is untouched, so every safety
  * property still holds; push and pull simply decline to carry out the half of
- * the plan they are not responsible for. Conflicts are reported in every mode.
+ * the plan they are not responsible for. Conflicts are reported in every mode,
+ * and so is a matrix both sides moved: merging one is bidirectional by nature,
+ * which is exactly what a one-way run is asking not to do.
  */
 export function narrowByDirection(plan: Plan, direction: Direction): Plan {
   if (direction === 'both') return plan
   const keep = direction === 'push' ? OUTBOUND : INBOUND
+  const keepApps = direction === 'push' ? APPS_OUTBOUND : APPS_INBOUND
   return {
     ...plan,
-    actions: plan.actions.filter((a) => keep.has(a.type) || a.type === 'set-apps'),
+    actions: plan.actions.filter((a) =>
+      a.type === 'set-apps' ? keepApps.has(a.resolution.appsDecision) : keep.has(a.type),
+    ),
   }
 }
 
@@ -159,6 +170,26 @@ export interface SyncOutcome {
   /** Credentials this run restored, and ones it could not. */
   secretsRepaired: string[]
   secretsPending: { id: string; reason: string }[]
+  /** Servers left holding an env key with no value; see blankCredentials(). */
+  blankCredentials: { id: string; keys: string[] }[]
+}
+
+/**
+ * Servers whose configuration names an environment key but has nothing to put
+ * in it. With `--no-secrets` this is the normal outcome of a pull — the key
+ * names travel through git, the values do not — and the server that results
+ * will start and fail. It is a credential, so it cannot be fixed silently; it
+ * can only be reported.
+ */
+export function blankCredentials(paths: CcPaths): { id: string; keys: string[] }[] {
+  const out: { id: string; keys: string[] }[] = []
+  for (const row of readMcp(paths)) {
+    const env = (row.config.env ?? {}) as Record<string, unknown>
+    if (env === null || typeof env !== 'object') continue
+    const keys = Object.keys(env).filter((k) => String(env[k] ?? '') === '').sort()
+    if (keys.length > 0) out.push({ id: row.id, keys })
+  }
+  return out
 }
 
 export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
@@ -193,7 +224,12 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
   }
 
   let pushed = false
-  if (!opts.dryRun && result.failed.length === 0) {
+  if (!opts.dryRun) {
+    // Publish what did land, even when something else failed. Every action
+    // records its own base and its own manifest entry, so a partial plan is
+    // still a consistent one — and withholding the manifest because of one
+    // permanently failing item would freeze every other item with it.
+    //
     // Order matters, and secrets come first. If the push landed and the secret
     // write then failed, the next run would see local === remote, decide
     // IN_SYNC, and never retry — leaving the other devices to rehydrate an
@@ -208,5 +244,12 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
     await saveState(opts.configDir, state)
   }
 
-  return { plan, result, unresolved: plan.conflicts, pushed, secretsRepaired, secretsPending }
+  // Read after the repair pass, so a value 1Password just restored is not
+  // reported as missing.
+  const blanks = opts.dryRun ? [] : blankCredentials(opts.paths)
+
+  return {
+    plan, result, unresolved: plan.conflicts, pushed,
+    secretsRepaired, secretsPending, blankCredentials: blanks,
+  }
 }

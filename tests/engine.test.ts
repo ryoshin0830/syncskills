@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { narrowByDirection } from '../src/engine.js'
 import { buildPlan } from '../src/core/plan.js'
 import { resolveItem } from '../src/core/resolve.js'
-import type { Side } from '../src/core/types.js'
+import type { App, Side } from '../src/core/types.js'
 
 const S = (h: string): Side => ({ contentHash: h, apps: ['claude'] })
 
@@ -37,18 +37,36 @@ describe('narrowByDirection', () => {
     }
   })
 
-  it('keeps set-apps in every direction, since the matrix is merged not directional', () => {
-    const p = buildPlan([
-      resolveItem({
-        kind: 'skill', id: 'm',
-        base: { contentHash: 'A', apps: ['claude'] },
-        local: { contentHash: 'A', apps: ['claude', 'codex'] },
-        remote: { contentHash: 'A', apps: ['claude'] },
-      }),
-    ])
-    for (const d of ['both', 'push', 'pull'] as const) {
-      expect(narrowByDirection(p, d).actions.map((a) => a.type)).toEqual(['set-apps'])
-    }
+  const matrixPlan = (local: App[], remote: App[]) => buildPlan([
+    resolveItem({
+      kind: 'skill', id: 'm',
+      base: { contentHash: 'A', apps: ['claude'] },
+      local: { contentHash: 'A', apps: local },
+      remote: { contentHash: 'A', apps: remote },
+    }),
+  ])
+
+  it('sends a locally changed matrix on push but not on pull', () => {
+    const p = matrixPlan(['claude', 'codex'], ['claude'])
+    expect(narrowByDirection(p, 'both').actions.map((a) => a.type)).toEqual(['set-apps'])
+    expect(narrowByDirection(p, 'push').actions.map((a) => a.type)).toEqual(['set-apps'])
+    // A pull that published this machine's enablement would not be a pull.
+    expect(narrowByDirection(p, 'pull').actions).toHaveLength(0)
+  })
+
+  it('takes a remotely changed matrix on pull but not on push', () => {
+    const p = matrixPlan(['claude'], ['claude', 'codex'])
+    expect(narrowByDirection(p, 'pull').actions.map((a) => a.type)).toEqual(['set-apps'])
+    expect(narrowByDirection(p, 'push').actions).toHaveLength(0)
+  })
+
+  it('leaves a matrix both sides moved to a bidirectional run', () => {
+    // Merging this one applies the other device's change here AND publishes
+    // ours — both halves at once, which is what a one-way run declines to do.
+    const p = matrixPlan(['claude', 'codex'], ['claude', 'gemini'])
+    expect(narrowByDirection(p, 'both').actions.map((a) => a.type)).toEqual(['set-apps'])
+    expect(narrowByDirection(p, 'push').actions).toHaveLength(0)
+    expect(narrowByDirection(p, 'pull').actions).toHaveLength(0)
   })
 
   it('does not mutate the plan it was given', () => {

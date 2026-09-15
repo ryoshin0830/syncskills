@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtemp, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { detectGhHosts, ensureRepo } from '../../src/commands/init.js'
+import { detectGhHosts, ensureRepo, parseRepoSlug } from '../../src/commands/init.js'
 import { makeStubBin } from '../helpers/stubBin.js'
 import type { Config } from '../../src/config.js'
 
@@ -76,5 +76,25 @@ esac
   it('raises a message naming the host when creation fails', async () => {
     const stub = await makeStubBin('gh', 1)
     await expect(ensureRepo(config, stub.bin)).rejects.toThrow(/could not create o\/r on github\.com/)
+  })
+})
+
+describe('parseRepoSlug', () => {
+  it('splits owner from name', () => {
+    expect(parseRepoSlug('me/syncskills')).toEqual({ owner: 'me', repo: 'syncskills' })
+  })
+
+  it('tolerates surrounding whitespace', () => {
+    expect(parseRepoSlug('  me/syncskills  ')).toEqual({ owner: 'me', repo: 'syncskills' })
+  })
+
+  /**
+   * A bare name used to be read as the owner, silently pairing it with a
+   * default repository name and pointing the device at the wrong place.
+   */
+  it('refuses anything that is not owner/name', () => {
+    for (const bad of ['syncskills', 'a/b/c', '/name', 'owner/', '', '   ']) {
+      expect(() => parseRepoSlug(bad), bad).toThrow(/owner\/name/)
+    }
   })
 })
