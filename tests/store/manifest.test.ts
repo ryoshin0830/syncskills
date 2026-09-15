@@ -146,3 +146,53 @@ describe('untrusted ids from the remote', () => {
     expect(unsafeManifestIds(evil('../escape'))).toEqual(['skill:../escape'])
   })
 })
+
+/**
+ * "Empty means the remote holds nothing; corrupt means do not act." An entry
+ * missing its contentHash was neither: manifestSides handed the resolver a Side
+ * whose hash was undefined, which decide() cannot tell from a side that is not
+ * there — so one hand-edited or truncated manifest.json in the shared
+ * repository resolved to DELETE_LOCAL and erased the skill from every machine.
+ */
+describe('a manifest with a damaged entry', () => {
+  const good = {
+    kind: 'skill', id: 'demo', contentHash: 'sha256:aaa', apps: ['claude'],
+    version: 1, updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'devA',
+  }
+  const wrap = (entry: unknown) =>
+    JSON.stringify({ schemaVersion: 1, entries: { 'skill:demo': entry } })
+
+  it('refuses an entry with no contentHash', () => {
+    const { contentHash, ...noHash } = good
+    expect(() => parseManifest(wrap(noHash))).toThrow(/skill:demo/)
+  })
+
+  it('refuses an entry whose contentHash is null', () => {
+    expect(() => parseManifest(wrap({ ...good, contentHash: null }))).toThrow(/contentHash/)
+  })
+
+  it('refuses an entry with no apps array', () => {
+    const { apps, ...noApps } = good
+    expect(() => parseManifest(wrap(noApps))).toThrow(/apps/)
+  })
+
+  it('refuses an entry with an unknown kind', () => {
+    expect(() => parseManifest(wrap({ ...good, kind: 'wat' }))).toThrow(/kind/)
+  })
+
+  it('refuses an entry that is not an object at all', () => {
+    expect(() => parseManifest(wrap('nonsense'))).toThrow(/skill:demo/)
+  })
+
+  it('refuses entries given as an array, which is not a map of entries', () => {
+    expect(() => parseManifest('{"schemaVersion":1,"entries":[]}')).toThrow(/entries/)
+  })
+
+  it('still accepts a whole, ordinary manifest', () => {
+    expect(parseManifest(wrap(good)).entries['skill:demo']!.id).toBe('demo')
+  })
+
+  it('still accepts a manifest with no entries at all', () => {
+    expect(parseManifest('{"schemaVersion":1,"entries":{}}').entries).toEqual({})
+  })
+})

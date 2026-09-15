@@ -83,3 +83,27 @@ describe('a line of equals signs in ordinary Markdown', () => {
     expect(hasConflictMarkers(text)).toBe(true)
   })
 })
+
+/**
+ * A merge agent is free-form: it returns whatever the model wrote. The outer
+ * markers are the last gate before that text is written into the skill and
+ * pushed everywhere, so they must not depend on the agent having copied git's
+ * trailing space after the marker.
+ */
+describe('markers an agent might emit without git’s trailing space', () => {
+  it('catches a bare <<<<<<< on its own line', () => {
+    expect(hasConflictMarkers('a\n<<<<<<<\nmine\n=======\ntheirs\n>>>>>>>\nb\n')).toBe(true)
+  })
+
+  it('catches a bare >>>>>>> even when the opener was dropped', () => {
+    expect(hasConflictMarkers('mine\ntheirs\n>>>>>>>\n')).toBe(true)
+  })
+
+  it('still lets a longer run of the same character through', () => {
+    expect(hasConflictMarkers('<<<<<<<<<<<<\nnot a marker\n')).toBe(false)
+  })
+
+  it('still does not mind a line of equals signs on its own', () => {
+    expect(hasConflictMarkers('Overview\n=======\n')).toBe(false)
+  })
+})

@@ -211,6 +211,24 @@ describe('credential repair and the empty matrix', () => {
     const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
     await expect(w.setSkillApps('never-existed', [])).rejects.toThrow(/never-existed/)
   })
+
+  /**
+   * `pendingReason` is writer-scoped and survives between actions, so a failure
+   * reported here must be about THIS item. A plan applies many actions through
+   * one writer, and a message left over from an earlier one sends the user
+   * looking at the wrong thing entirely.
+   */
+  it('does not report an earlier action’s failure as this one’s', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    // An earlier action leaves a reason behind.
+    await w.deleteSkill('gone-already')
+    expect(w.lastPendingReason()).toBeDefined()
+
+    await expect(w.setMcpApps('never-existed', []))
+      .rejects.toThrow(/never-existed/)
+    await expect(w.setMcpApps('never-existed', []))
+      .rejects.not.toThrow(/gone-already/)
+  })
 })
 
 describe('importing something that is enabled nowhere', () => {

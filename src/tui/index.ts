@@ -16,10 +16,12 @@ import { setBase } from '../state.js'
 import { upsertEntry } from '../store/manifest.js'
 import { existingBaseTree, saveBaseTree } from '../basetree.js'
 import { summarize, renderDiff } from './diff.js'
+import { describeConflict } from './conflictChoice.js'
+import type { ChoiceSide } from './conflictChoice.js'
 import { EXIT } from '../cli.js'
 import { answer } from '../prompt.js'
 import { PushRejected } from '../store/git.js'
-import { dropWrittenBases } from '../engine.js'
+import { dropWrittenBases, dropStoredSecrets } from '../engine.js'
 import { stateKey } from '../state.js'
 import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
@@ -109,11 +111,14 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
         `sync from ${opts.config.device} (${applied} change(s))`,
       )
       await saveState(opts.configDir, state)
+      // After the push, never before — see ApplyResult.secretsToDrop.
+      await dropStoredSecrets(opts, secrets, blob, result?.secretsToDrop ?? [], secretsUnreadable)
       return { pushed: ok }
     } catch (e) {
       if (!(e instanceof PushRejected)) throw e
       await dropWrittenBases(
-        opts.configDir, plan, result ?? { applied: [], failed: [], pending: [], backupDir: null },
+        opts.configDir, plan,
+        result ?? { applied: [], failed: [], pending: [], backupDir: null, secretsToDrop: [] },
       )
       return { pushed: false, rejected: e.message }
     }
@@ -128,27 +133,38 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       // wins is the whole resolution — dropping them here silently is what used
       // to make `sync` report the same conflict forever with no way out.
       if (c.kind !== 'skill') {
+        const choice = describeConflict(c)
         const pick = answer<string>(await p.select({
-          message: `${c.kind}/${c.id} changed on both machines. ` +
-                   `It cannot be merged line by line — which side wins?`,
-          options: [
-            { value: 'skip', label: 'Decide later (leave both as they are)' },
-            { value: 'local', label: 'Keep this device’s version' },
-            { value: 'remote', label: 'Take the other device’s version' },
-          ],
+          message: choice.message,
+          options: choice.options,
         }))
         if (pick === 'skip') {
           stillUnresolved.push(c)
           continue
         }
+        const side = pick as ChoiceSide
+        // A deletion travels to every other machine and, for an MCP server,
+        // takes the stored credential with it. The select above says so; this
+        // makes it a second, deliberate keystroke rather than one.
+        if (choice.destructive[side]) {
+          const sure = answer(await p.confirm({
+            message: `${choice.optionFor(side)} — this cannot be undone. Go ahead?`,
+            initialValue: false,
+          }))
+          if (!sure) {
+            stillUnresolved.push(c)
+            p.log.info(`${c.kind}/${c.id} left alone.`)
+            continue
+          }
+        }
         if (opts.dryRun) {
-          p.log.info(`${c.kind}/${c.id}: would take the ${pick} version (dry run, nothing written)`)
+          p.log.info(`${c.kind}/${c.id}: would take the ${side} version (dry run, nothing written)`)
           stillUnresolved.push(c)
           continue
         }
         // Carried out as the ordinary action it amounts to, so the base, the
         // manifest and the stored credentials are recorded exactly once.
-        takeSide(plan, c, pick as 'local' | 'remote')
+        takeSide(plan, c, side)
         queuedFromConflicts.push(c)
         continue
       }
@@ -296,6 +312,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
   const result = await applyPlan(plan, {
     paths: opts.paths, writer, store, manifest, state, secrets, blob,
     device: opts.config.device, configDir: opts.configDir, dryRun: opts.dryRun,
+    secretsToDrop: [],
   })
   aspin.stop('Applied')
 

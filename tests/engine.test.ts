@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { narrowByDirection } from '../src/engine.js'
+import { narrowByDirection, assertConflictResolutionAllowed } from '../src/engine.js'
 import { buildPlan } from '../src/core/plan.js'
 import { resolveItem } from '../src/core/resolve.js'
 import type { App, Side, Decision, Resolution } from '../src/core/types.js'
@@ -108,5 +108,37 @@ describe('narrowByDirection counts', () => {
     const plan = narrowByDirection(buildPlan([r('PUSH'), r('PULL'), r('IN_SYNC')]), 'push')
     const fromActions = plan.actions.filter((a) => a.type === 'push-content').length
     expect(plan.counts['push-content']).toBe(fromActions)
+  })
+})
+
+/**
+ * `narrowByDirection` deliberately never narrows conflicts — resolving one is
+ * bidirectional by nature, which is exactly what a one-way run is asking not to
+ * do. A resolver would smuggle the other half of the plan back in, so the two
+ * cannot be combined.
+ */
+describe('resolving conflicts in a one-way run', () => {
+  const opts = (direction: string) =>
+    ({ direction, resolveConflict: () => 'local' }) as unknown as Parameters<
+      typeof assertConflictResolutionAllowed
+    >[0]
+
+  it('is refused for push', () => {
+    expect(() => assertConflictResolutionAllowed(opts('push'))).toThrow(/one-way|bidirectional/i)
+  })
+
+  it('is refused for pull', () => {
+    expect(() => assertConflictResolutionAllowed(opts('pull'))).toThrow(/one-way|bidirectional/i)
+  })
+
+  it('is allowed for a full sync', () => {
+    expect(() => assertConflictResolutionAllowed(opts('both'))).not.toThrow()
+  })
+
+  it('says nothing when no resolver was given', () => {
+    const bare = { direction: 'push' } as unknown as Parameters<
+      typeof assertConflictResolutionAllowed
+    >[0]
+    expect(() => assertConflictResolutionAllowed(bare)).not.toThrow()
   })
 })

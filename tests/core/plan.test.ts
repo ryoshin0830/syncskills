@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildPlan, resolveConflictAs, sortActions } from '../../src/core/plan.js'
+import { buildPlan, resolveConflictAs, sortActions, takeSide } from '../../src/core/plan.js'
 import type { Action } from '../../src/core/plan.js'
 import { resolveItem } from '../../src/core/resolve.js'
 import type { Side } from '../../src/core/types.js'
@@ -220,5 +220,41 @@ describe('sortActions', () => {
   it('is stable on id within one type', () => {
     const out = sortActions([act('push-content', 'z'), act('push-content', 'a')])
     expect(out.map((a) => a.id)).toEqual(['a', 'z'])
+  })
+})
+
+/**
+ * `counts` is what `--json` reports and what the interface summarises. Settling
+ * a conflict moves an item from `merge` to a real action; leaving the counts
+ * alone would undo the recount narrowByDirection does and report a conflict
+ * that no longer exists.
+ */
+describe('takeSide keeps counts honest', () => {
+  const conflictPlan = () => buildPlan([{
+    kind: 'mcp', id: 'x', decision: 'CONFLICT', conflictKind: 'both-edited',
+    appsDecision: 'IN_SYNC', apps: [],
+    base: { contentHash: 'a', apps: [] },
+    local: { contentHash: 'b', apps: [] },
+    remote: { contentHash: 'c', apps: [] },
+  }])
+
+  it('stops counting a settled conflict as a merge', () => {
+    const plan = conflictPlan()
+    expect(plan.counts.merge).toBe(1)
+    takeSide(plan, plan.conflicts[0]!, 'local')
+    expect(plan.counts.merge).toBe(0)
+  })
+
+  it('counts the action it became', () => {
+    const plan = conflictPlan()
+    takeSide(plan, plan.conflicts[0]!, 'local')
+    expect(plan.counts['push-content']).toBe(1)
+  })
+
+  it('counts a pull when the other side is taken', () => {
+    const plan = conflictPlan()
+    takeSide(plan, plan.conflicts[0]!, 'remote')
+    expect(plan.counts['pull-content']).toBe(1)
+    expect(plan.counts.merge).toBe(0)
   })
 })

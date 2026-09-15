@@ -87,12 +87,20 @@ export function createWriter(opts: {
   async function zeroMatrix(
     table: 'skills' | 'mcp_servers', keyColumn: string, key: string,
   ): Promise<void> {
+    // `pendingReason` is writer-scoped and outlives one action. Reading it here
+    // without clearing it first reported an earlier item's failure as this
+    // one's — "skill/b: could not delete 'a'" — so the reason for THIS call is
+    // kept locally and only then published.
+    pendingReason = undefined
+    let reason: string | undefined
     const ok = await zeroAppMatrix(opts.paths, table, keyColumn, key, isRunning)
       .catch((e: Error) => {
-        pendingReason = e.message
+        reason = e.message
         return false
       })
-    if (!ok) throw new Error(pendingReason ?? `could not disable "${key}" everywhere`)
+    if (ok) return
+    pendingReason = reason ?? `could not disable "${key}" everywhere; it has no cc-switch row`
+    throw new Error(pendingReason)
   }
 
   async function putMcpApps(id: string, apps: App[]): Promise<void> {

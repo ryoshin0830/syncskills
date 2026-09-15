@@ -50,6 +50,7 @@ export interface Device {
   readSkill(dir: string): Promise<string | null>
   deleteSkill(dir: string): Promise<void>
   addMcpServer(id: string, config: unknown, apps?: string[]): void
+  deleteMcpRow(id: string): void
   addRepoRow(owner: string, name: string, branch?: string, enabled?: boolean): void
   addMcpServerWithTags(id: string, config: unknown, apps: string[], tags: string[]): void
   listMcpRows(): { id: string; config: Record<string, unknown>; apps: string[]; tags: string[] }[]
@@ -181,6 +182,16 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
       const d = new DatabaseSync(paths.db)
       try {
         d.prepare('DELETE FROM skills WHERE directory = ?').run(dir)
+      } finally {
+        d.close()
+      }
+    },
+
+    deleteMcpRow(id) {
+      const DatabaseSync = loadDatabaseSync()
+      const d = new DatabaseSync(paths.db)
+      try {
+        d.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id)
       } finally {
         d.close()
       }

@@ -27,6 +27,8 @@ export interface ApplyContext {
   device: string
   configDir: string
   dryRun: boolean
+  /** Filled by applyOne; see ApplyResult.secretsToDrop. */
+  secretsToDrop: string[]
 }
 
 export interface ApplyResult {
@@ -35,6 +37,19 @@ export interface ApplyResult {
   /** Actions that need the user to finish them by hand. */
   pending: Action[]
   backupDir: string | null
+  /**
+   * Credentials to drop from the store once the push has landed, and not
+   * before.
+   *
+   * Everything else the blob does is an addition, which is published first on
+   * purpose: if the push lands and the secret write then fails, the next run
+   * still sees work to do. A DELETION cannot follow that rule. Published first
+   * and then raced, it removes the only copy of a value the store still says
+   * every machine needs — and env values are outside the content hash, so no
+   * later run notices. Deferred, the worst case is an orphan entry for a server
+   * nobody has, which costs nothing.
+   */
+  secretsToDrop: string[]
 }
 
 /**
@@ -84,7 +99,9 @@ export async function assertNoSecrets(dir: string, label: string): Promise<void>
 }
 
 export async function applyPlan(plan: Plan, ctx: ApplyContext): Promise<ApplyResult> {
-  const result: ApplyResult = { applied: [], failed: [], pending: [], backupDir: null }
+  const result: ApplyResult = {
+    applied: [], failed: [], pending: [], backupDir: null, secretsToDrop: ctx.secretsToDrop,
+  }
   if (!ctx.dryRun) await recordAgreedBases(plan, ctx)
   if (plan.actions.length === 0) return result
   // A dry run is described as changing nothing, and a backup is a change: it
@@ -237,14 +254,22 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         if (!existsSync(src)) throw new Error(`local skill ${id} vanished before it could be pushed`)
         await assertNoSecrets(src, `skills/${id}`)
 
-        const dest = ctx.store.itemDir('skill', id)
-        await rm(dest, { recursive: true, force: true })
-        await copyTree(src, dest)
-
         // The matrix we record is the MERGED one. It has to land on this
         // machine too, or the next run reads the disagreement as a deliberate
         // local change and pushes it back, undoing the other device's work.
+        //
+        // It goes FIRST because it is the step that can fail — cc-switch
+        // refusing, the binary missing, an empty matrix while cc-switch is
+        // open. Copying into the store before it left committed bytes that no
+        // manifest entry described: the other machine read its own hash, called
+        // itself in sync, and never saw the newer content sitting in the
+        // repository. Applying it first is safe to repeat, since the write is
+        // skipped when the matrix already matches.
         await applyMergedApps(ctx, action)
+
+        const dest = ctx.store.itemDir('skill', id)
+        await rm(dest, { recursive: true, force: true })
+        await copyTree(src, dest)
 
         const side = { contentHash: await treeHash(src), apps: resolution.apps }
         setBase(ctx.state, kind, id, side)
@@ -269,13 +294,17 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
           )
         }
 
+        // First, for the same reason as a skill below: it is the step that can
+        // fail, and nothing may reach the store that the manifest will not
+        // describe.
+        await applyMergedApps(ctx, action)
+
         await ctx.store.writeItemJson('mcp', id, sanitized)
         // Emptying a server's env must clear the stored values, not leave the
-        // old ones behind in 1Password.
+        // old ones behind in 1Password — but not before the push lands, for the
+        // same reason a delete waits. See secretsToDrop.
         if (Object.keys(secrets).length > 0) ctx.blob.mcp[id] = { env: secrets }
-        else delete ctx.blob.mcp[id]
-
-        await applyMergedApps(ctx, action)
+        else ctx.secretsToDrop.push(id)
 
         const side = {
           contentHash: canonicalJsonHash({ config: sanitized }),
@@ -305,8 +334,8 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
       await ctx.store.removeItem(kind, id)
       removeEntry(ctx.manifest, kind, id)
       // Only an MCP server owns a secret; a skill that happens to share its
-      // name must not drop it.
-      if (kind === 'mcp') delete ctx.blob.mcp[id]
+      // name must not drop it. Queued rather than done here: see secretsToDrop.
+      if (kind === 'mcp') ctx.secretsToDrop.push(id)
       setBase(ctx.state, kind, id, undefined)
       await dropBaseTree(ctx.configDir, kind, id)
       return 'done'

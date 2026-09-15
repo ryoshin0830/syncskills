@@ -39,10 +39,37 @@ export function parseManifest(text: string): Manifest {
   if (m.schemaVersion !== 1) {
     throw new Error(`unsupported manifest schema version ${m.schemaVersion}; upgrade syncskills`)
   }
-  if (m.entries === null || typeof m.entries !== 'object') {
+  if (m.entries === null || typeof m.entries !== 'object' || Array.isArray(m.entries)) {
     throw new Error('manifest.json has no entries object')
   }
+  // Every entry, not just the envelope. A half-built entry is the dangerous
+  // shape: manifestSides would hand the resolver a Side whose contentHash is
+  // undefined, and decide() cannot tell that from a side that is not there —
+  // so one damaged entry resolves to "the remote deleted it" and erases the
+  // item from every machine. Refusing the file is the only safe reading of it.
+  for (const [key, e] of Object.entries(m.entries)) {
+    validateEntry(key, e as unknown)
+  }
   return m
+}
+
+const KINDS = new Set<string>(['skill', 'mcp', 'repo'])
+
+function validateEntry(key: string, e: unknown): void {
+  const bad = (why: string): never => {
+    throw new Error(`manifest.json entry "${key}" is damaged: ${why}. Nothing was changed.`)
+  }
+  if (e === null || typeof e !== 'object' || Array.isArray(e)) bad('it is not an object')
+  const entry = e as Partial<ManifestEntry>
+
+  if (typeof entry.kind !== 'string' || !KINDS.has(entry.kind)) bad('kind is missing or unknown')
+  if (typeof entry.id !== 'string' || entry.id === '') bad('id is missing')
+  if (typeof entry.contentHash !== 'string' || entry.contentHash === '') {
+    bad('contentHash is missing')
+  }
+  if (!Array.isArray(entry.apps) || entry.apps.some((a) => typeof a !== 'string')) {
+    bad('apps is missing or is not a list of names')
+  }
 }
 
 /**

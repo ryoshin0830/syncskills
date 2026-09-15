@@ -257,7 +257,25 @@ export function assertSecretsReadable(opts: EngineOptions, g: Gathered): void {
   )
 }
 
+/**
+ * A one-way run may not settle conflicts.
+ *
+ * narrowByDirection leaves `plan.conflicts` alone on purpose: resolving one is
+ * bidirectional by nature, which is exactly what `push` and `pull` are asking
+ * not to do. Converting a conflict to an action afterwards would put the
+ * declined half of the plan back, unchecked, so the combination is refused
+ * rather than silently narrowed a second time.
+ */
+export function assertConflictResolutionAllowed(opts: EngineOptions): void {
+  if (opts.resolveConflict === undefined || opts.direction === 'both') return
+  throw new Error(
+    `conflicts cannot be settled in a one-way run: taking a side is bidirectional, ` +
+    `and \`${opts.direction}\` declined half the plan. Run a full sync instead.`,
+  )
+}
+
 export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
+  assertConflictResolutionAllowed(opts)
   const gathered = await gather(opts)
   assertSecretsReadable(opts, gathered)
   const {
@@ -284,6 +302,7 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
   const result = await applyPlan(plan, {
     paths: opts.paths, writer, store, manifest, state, secrets, blob,
     device: opts.config.device, configDir: opts.configDir, dryRun: opts.dryRun,
+    secretsToDrop: [],
   })
 
   // Restore any credential 1Password holds that this machine is missing. A
@@ -327,6 +346,7 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
         `sync from ${opts.config.device} (${result.applied.length} change(s))`,
       )
       await saveState(opts.configDir, state)
+      await dropStoredSecrets(opts, secrets, blob, result.secretsToDrop, secretsUnreadable)
     } catch (e) {
       if (!(e instanceof PushRejected)) throw e
       pushRejected = e.message
@@ -349,6 +369,32 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
     secretsRepaired, secretsPending, blankCredentials: blanks,
     ...(pushRejected === undefined ? {} : { pushRejected }),
   }
+}
+
+/**
+ * Remove the credentials of servers this run deleted — after the push, never
+ * before. See ApplyResult.secretsToDrop for why the ordering is inverted here
+ * relative to every other blob write.
+ *
+ * A failure is deliberately not fatal: by this point the deletion has landed
+ * everywhere, and all that is left behind is an entry for a server no machine
+ * has. The next run that touches the blob clears it.
+ */
+export async function dropStoredSecrets(
+  opts: EngineOptions,
+  secrets: SecretProvider,
+  blob: SecretBlob,
+  ids: string[],
+  secretsUnreadable: string | undefined,
+): Promise<void> {
+  if (ids.length === 0 || !opts.useSecrets || secretsUnreadable !== undefined) return
+  let changed = false
+  for (const id of ids) {
+    if (blob.mcp[id] === undefined) continue
+    delete blob.mcp[id]
+    changed = true
+  }
+  if (changed) await secrets.write(blob)
 }
 
 /**

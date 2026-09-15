@@ -111,9 +111,14 @@ export function sortActions(actions: Action[]): Action[] {
  * one of those records lives in applyOne() and nowhere else.
  */
 export function takeSide(plan: Plan, action: Action, side: 'local' | 'remote'): void {
-  plan.actions.push(resolveConflictAs(action, side))
+  const converted = resolveConflictAs(action, side)
+  plan.actions.push(converted)
   // The plan was ordered when it was built, and the order is load-bearing.
   sortActions(plan.actions)
+  // The item is no longer a merge and is now an action of its own. Counts are
+  // reported by `--json` and summarised on screen, so they move with it.
+  if (plan.counts.merge > 0) plan.counts.merge--
+  plan.counts[converted.type]++
 }
 
 export function resolveConflictAs(action: Action, side: 'local' | 'remote'): Action {

@@ -6,7 +6,13 @@
  * --diff3 adds is checked too, since it is never ordinary text.
  */
 export function hasConflictMarkers(text: string): boolean {
-  return /^<{7}[ \t]/m.test(text) || /^\|{7}[ \t]/m.test(text) || /^>{7}[ \t]/m.test(text)
+  // Exactly seven, then a space or the end of the line. git always writes a
+  // label after the marker; an AI agent writing the shape from memory may not,
+  // and its output faces no other gate. Requiring the run to END at seven keeps
+  // a longer row of the same character — a divider — from matching.
+  return /^<{7}(?:[ \t].*)?$/m.test(text)
+    || /^\|{7}(?:[ \t].*)?$/m.test(text)
+    || /^>{7}(?:[ \t].*)?$/m.test(text)
 }
 
 export type Validation = { ok: true } | { ok: false; reason: string }
