@@ -35,8 +35,14 @@ export async function saveBaseTree(
   configDir: string, kind: ItemKind, id: string, src: string, contentHash: string,
 ): Promise<void> {
   const dest = baseTreeDir(configDir, kind, id)
-  await rm(dest, { recursive: true, force: true })
+  // The hash goes FIRST, before a single byte of the tree moves. Several
+  // callers re-save a tree under a hash state.json already holds, so a hash
+  // file that outlived the copy would AGREE with whatever a crash left behind —
+  // and a half-written tree used as an ancestor drops the missing files
+  // silently, as deleted on both sides. The invalid window has to be
+  // hash-absent, which reads as no ancestor at all.
   await rm(hashFile(configDir, kind, id), { force: true })
+  await rm(dest, { recursive: true, force: true })
   if (!existsSync(src)) return
   await mkdir(dest, { recursive: true })
   await copyTree(src, dest)

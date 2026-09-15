@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, chmod } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { saveBaseTree, existingBaseTree, dropBaseTree } from '../src/basetree.js'
@@ -65,5 +65,38 @@ describe('a base tree whose state was never saved', () => {
     await saveBaseTree(configDir, 'skill', 'demo', src, 'sha256:v3')
     expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v2')).toBeUndefined()
     expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v3')).toBeDefined()
+  })
+})
+
+/**
+ * The dangerous window is a save that dies partway. Several callers re-save a
+ * tree under a hash state.json ALREADY holds — recordAgreedBases filling in a
+ * missing tree, and set-apps — so if the hash beside it outlived the copy, a
+ * half-written tree would pass the check and be used as an ancestor. Files
+ * missing from it read as "deleted on both sides" and are dropped in silence.
+ *
+ * So the hash goes away before the copy starts and comes back only after it
+ * finishes: the invalid window is hash-ABSENT, never hash-agreeing.
+ */
+describe('a save that fails partway through', () => {
+  it('leaves no hash agreeing with a half-written tree', async () => {
+    await saveBaseTree(configDir, 'skill', 'demo', src, 'sha256:v1')
+    expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v1')).toBeDefined()
+
+    // A source that cannot be read all the way through.
+    const broken = await mkdtemp(join(tmpdir(), 'ss-bt-broken-'))
+    await writeFile(join(broken, 'SKILL.md'), 'v1\n')
+    await mkdir(join(broken, 'locked'))
+    await writeFile(join(broken, 'locked', 'inner.md'), 'x\n')
+    await chmod(join(broken, 'locked'), 0o000)
+
+    try {
+      // The SAME hash: this is the re-save case, where a surviving hash file
+      // would agree with whatever the interrupted copy left behind.
+      await expect(saveBaseTree(configDir, 'skill', 'demo', broken, 'sha256:v1')).rejects.toThrow()
+      expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v1')).toBeUndefined()
+    } finally {
+      await chmod(join(broken, 'locked'), 0o700)
+    }
   })
 })
