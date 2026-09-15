@@ -1,0 +1,90 @@
+import { spawn } from 'node:child_process'
+
+export interface RunResult { code: number; stdout: string; stderr: string }
+
+export interface RunOptions {
+  input?: string
+  env?: Record<string, string>
+  cwd?: string
+  /**
+   * Give up on a child that has not exited by then. Left unset by default:
+   * git and cc-switch are allowed to take as long as they take. It matters for
+   * a process that can stop answering without exiting — an AI merge agent
+   * waiting on a rate limit — where the alternative is a promise that never
+   * settles and an interactive spinner that turns forever.
+   */
+  timeoutMs?: number
+}
+
+export function run(bin: string, args: string[], opts: RunOptions = {}): Promise<RunResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      ...(opts.timeoutMs === undefined
+        ? {}
+        // SIGTERM first so the child can tidy up; SIGKILL shortly after for one
+        // that ignores it, because "timed out" has to actually end.
+        : { timeout: opts.timeoutMs, killSignal: 'SIGTERM' as const }),
+    })
+    // Collected as bytes and decoded once at the end. Adding a Buffer to a
+    // string decodes that chunk alone, so a multi-byte character split across a
+    // pipe boundary would become U+FFFD — and this output is not for display:
+    // it is returned as merged file content and written to every machine.
+    const outChunks: Buffer[] = []
+    const errChunks: Buffer[] = []
+    let killer: NodeJS.Timeout | undefined
+    if (opts.timeoutMs !== undefined) {
+      killer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs + 2000)
+      killer.unref()
+    }
+    let abandon: NodeJS.Timeout | undefined
+    let settled = false
+
+    function finish(code: number | null, signal: NodeJS.Signals | null): void {
+      if (settled) return
+      settled = true
+      clearTimeout(killer)
+      clearTimeout(abandon)
+      const stdout = Buffer.concat(outChunks).toString('utf8')
+      let stderr = Buffer.concat(errChunks).toString('utf8')
+      if (signal !== null && stderr === '') {
+        stderr = `${bin} was stopped after ${String(opts.timeoutMs)}ms without exiting`
+      }
+      // A signalled child reports a null code; 1 keeps "did it work?" answerable
+      // with the same check everywhere.
+      resolve({ code: code ?? 1, stdout, stderr })
+    }
+
+    child.stdout.on('data', (d: Buffer) => { outChunks.push(d) })
+    child.stderr.on('data', (d: Buffer) => { errChunks.push(d) })
+    child.on('error', (e) => { clearTimeout(killer); clearTimeout(abandon); reject(e) })
+    child.on('close', (code, signal) => { finish(code, signal) })
+
+    /**
+     * 'close' waits for the child's STDIO to close, which is not the same as the
+     * child exiting: anything the child started of its own inherits those pipes
+     * and can hold them open after the child is gone. Killing such a child gives
+     * 'exit' and never 'close', and the promise never settles — the interactive
+     * spinner turns for ever, which is precisely what the timeout exists to
+     * prevent. `sh -c 'sleep 30'` happens to exec-replace the shell on macOS and
+     * so never showed this; on Linux it did.
+     *
+     * Only a SIGNALLED exit takes this path. An ordinary one waits for 'close'
+     * as before, so output still draining is never truncated.
+     */
+    child.on('exit', (code, signal) => {
+      if (signal === null || settled) return
+      abandon = setTimeout(() => { finish(code, signal) }, 500)
+      abandon.unref()
+    })
+    // A child that exits before it has read its stdin makes the write fail with
+    // EPIPE. Without a listener that is an unhandled 'error' event, which takes
+    // the whole CLI down; the child's exit code is the answer we actually want,
+    // so the write failure is swallowed and 'close' still resolves the promise.
+    child.stdin.on('error', () => {})
+    if (opts.input !== undefined) child.stdin.write(opts.input)
+    child.stdin.end()
+  })
+}
