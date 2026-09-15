@@ -194,6 +194,23 @@ describe('credential repair and the empty matrix', () => {
     const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: running })
     await expect(w.setMcpApps('o', [])).rejects.toThrow(/cc-switch is running/)
   })
+
+  /**
+   * deleteSkillRow and directDelete both check the row exists first, so that
+   * "the caller never records a delete that did not happen". Clearing a matrix
+   * has exactly the same obligation: reporting success for a row that is not
+   * there writes a base and a manifest entry describing a state the database
+   * does not hold.
+   */
+  it('refuses to claim it disabled a server that has no row', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await expect(w.setMcpApps('never-existed', [])).rejects.toThrow(/never-existed/)
+  })
+
+  it('refuses to claim it disabled a skill that has no row', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await expect(w.setSkillApps('never-existed', [])).rejects.toThrow(/never-existed/)
+  })
 })
 
 describe('importing something that is enabled nowhere', () => {
@@ -213,6 +230,11 @@ describe('importing something that is enabled nowhere', () => {
    * row had already been deleted, which lost the server outright.
    */
   it('never asks cc-switch to accept an empty app list', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    // The stub binary does not write rows, so the row stands in for what the
+    // deep link would have created.
+    addMcp(f, 'o', { type: 'stdio', command: 'x' }, ['claude'])
+
     const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
     await w.importMcp('o', { type: 'stdio', command: 'x' }, [])
 
@@ -236,6 +258,10 @@ describe('importing something that is enabled nowhere', () => {
   })
 
   it('imports a skill that is enabled nowhere', async () => {
+    const { addSkill } = await import('../helpers/fakeCcSwitch.js')
+    // Stands in for the row `skills import-from-apps` would have created.
+    await addSkill(f, 'quiet', '---\nname: quiet\ndescription: d\n---\nQ\n', ['claude'])
+
     const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
     await w.importSkill('quiet', [])
 

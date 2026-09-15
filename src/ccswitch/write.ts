@@ -281,6 +281,12 @@ async function zeroAppMatrix(
   const DatabaseSync = loadDatabaseSync()
   const db = new DatabaseSync(p.db)
   try {
+    // Same obligation as deleteSkillRow: an UPDATE that matched nothing must
+    // not be reported as applied, or the caller records a base and a manifest
+    // entry for a state the database does not hold.
+    if (db.prepare(`SELECT 1 FROM ${table} WHERE ${keyColumn} = ?`).get(key) === undefined) {
+      return false
+    }
     const sets = APP_COLUMNS.map((c) => `${c} = 0`).join(', ')
     db.exec('BEGIN')
     db.prepare(`UPDATE ${table} SET ${sets} WHERE ${keyColumn} = ?`).run(key)

@@ -78,7 +78,7 @@ export async function syncCommand(
 
   if (unresolved.length > 0) {
     line(
-      pc.dim(`  run \`syncskills\` with no arguments to merge ${unresolved.length === 1 ? 'it' : 'them'} interactively`),
+      pc.dim(`  run \`syncskills\` with no arguments to resolve ${unresolved.length === 1 ? 'it' : 'them'} interactively`),
       io,
     )
   }

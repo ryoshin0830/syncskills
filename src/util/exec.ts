@@ -28,18 +28,24 @@ export function run(bin: string, args: string[], opts: RunOptions = {}): Promise
         // that ignores it, because "timed out" has to actually end.
         : { timeout: opts.timeoutMs, killSignal: 'SIGTERM' as const }),
     })
-    let stdout = ''
-    let stderr = ''
+    // Collected as bytes and decoded once at the end. Adding a Buffer to a
+    // string decodes that chunk alone, so a multi-byte character split across a
+    // pipe boundary would become U+FFFD — and this output is not for display:
+    // it is returned as merged file content and written to every machine.
+    const outChunks: Buffer[] = []
+    const errChunks: Buffer[] = []
     let killer: NodeJS.Timeout | undefined
     if (opts.timeoutMs !== undefined) {
       killer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs + 2000)
       killer.unref()
     }
-    child.stdout.on('data', (d) => { stdout += d })
-    child.stderr.on('data', (d) => { stderr += d })
+    child.stdout.on('data', (d: Buffer) => { outChunks.push(d) })
+    child.stderr.on('data', (d: Buffer) => { errChunks.push(d) })
     child.on('error', (e) => { clearTimeout(killer); reject(e) })
     child.on('close', (code, signal) => {
       clearTimeout(killer)
+      const stdout = Buffer.concat(outChunks).toString('utf8')
+      let stderr = Buffer.concat(errChunks).toString('utf8')
       if (signal !== null && stderr === '') {
         stderr = `${bin} was stopped after ${String(opts.timeoutMs)}ms without exiting`
       }

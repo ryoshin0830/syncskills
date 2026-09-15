@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { narrowByDirection } from '../src/engine.js'
 import { buildPlan } from '../src/core/plan.js'
 import { resolveItem } from '../src/core/resolve.js'
-import type { App, Side } from '../src/core/types.js'
+import type { App, Side, Decision, Resolution } from '../src/core/types.js'
 
 const S = (h: string): Side => ({ contentHash: h, apps: ['claude'] })
 
@@ -73,5 +73,40 @@ describe('narrowByDirection', () => {
     const p = plan()
     narrowByDirection(p, 'push')
     expect(p.actions).toHaveLength(4)
+  })
+})
+
+/**
+ * `push` and `pull` decline half the plan, and a script reading `counts` has to
+ * see what will actually be done. The narrowed plan used to carry the counts of
+ * the plan it was narrowed FROM, so `push --json` reported pulls it never made.
+ */
+describe('narrowByDirection counts', () => {
+  const r = (decision: Decision): Resolution => ({
+    kind: 'skill', id: decision, decision, appsDecision: 'IN_SYNC', apps: [],
+    local: { contentHash: 'h', apps: [] },
+  })
+
+  it('counts only what a push will do', () => {
+    const plan = narrowByDirection(buildPlan([r('PUSH'), r('PULL')]), 'push')
+    expect(plan.counts['pull-content']).toBe(0)
+    expect(plan.counts['push-content']).toBe(1)
+  })
+
+  it('counts only what a pull will do', () => {
+    const plan = narrowByDirection(buildPlan([r('PUSH'), r('PULL')]), 'pull')
+    expect(plan.counts['push-content']).toBe(0)
+    expect(plan.counts['pull-content']).toBe(1)
+  })
+
+  it('still counts conflicts, which every direction reports', () => {
+    const plan = narrowByDirection(buildPlan([r('CONFLICT')]), 'push')
+    expect(plan.counts.merge).toBe(1)
+  })
+
+  it('agrees with the actions it kept', () => {
+    const plan = narrowByDirection(buildPlan([r('PUSH'), r('PULL'), r('IN_SYNC')]), 'push')
+    const fromActions = plan.actions.filter((a) => a.type === 'push-content').length
+    expect(plan.counts['push-content']).toBe(fromActions)
   })
 })

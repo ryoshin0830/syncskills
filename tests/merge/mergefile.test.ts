@@ -46,3 +46,27 @@ describe('mergeFile', () => {
     expect(out.text).toContain('bottom')
   })
 })
+
+/**
+ * Regression: run() used to decode each pipe chunk on its own, so a clean merge
+ * of a large Japanese skill came back with U+FFFD where a character straddled a
+ * 64KB boundary — and mergeTrees writes that straight into the skill.
+ */
+it('returns a large Japanese merge undamaged', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ss-mf-utf8-'))
+  const lines = Array.from({ length: 20_000 }, (_, i) => `行${i}：日本語のスキル本文です。`)
+  const base = lines.join('\n') + '\n'
+  const b = join(dir, 'base')
+  const l = join(dir, 'local')
+  const r = join(dir, 'remote')
+  await writeFile(b, base)
+  await writeFile(l, base + 'ローカルの追記\n')
+  await writeFile(r, 'リモートの追記\n' + base)
+
+  const out = await mergeFile(b, l, r)
+
+  expect(out.clean).toBe(true)
+  expect(out.text.includes('�')).toBe(false)
+  expect(out.text).toContain('ローカルの追記')
+  expect(out.text).toContain('リモートの追記')
+})

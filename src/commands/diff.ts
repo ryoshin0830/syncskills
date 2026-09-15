@@ -9,6 +9,7 @@ import { emitJson, emitJsonError, line } from '../output.js'
 import { EXIT } from '../cli.js'
 import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
+import type { ItemKind, Resolution } from '../core/types.js'
 
 async function readTree(dir: string): Promise<Map<string, string>> {
   const out = new Map<string, string>()
@@ -17,6 +18,34 @@ async function readTree(dir: string): Promise<Map<string, string>> {
     out.set(e.rel, await readFile(e.abs, 'utf8').catch(() => '<binary>'))
   }
   return out
+}
+
+const KINDS: ItemKind[] = ['skill', 'mcp', 'repo']
+
+/**
+ * Find the item a `diff` argument names.
+ *
+ * A skill and an MCP server may share a name, so an id on its own is not always
+ * enough; `kind/id` disambiguates, and an ambiguous bare name is reported
+ * rather than resolved to whichever sorted first. A repository id contains a
+ * slash of its own, which is why the prefix is matched against the known kinds
+ * instead of splitting on the first separator.
+ */
+export function selectItem(
+  resolutions: Resolution[], query: string,
+): { item: Resolution | undefined } | { ambiguous: ItemKind[] } {
+  for (const k of KINDS) {
+    if (!query.startsWith(`${k}/`)) continue
+    const id = query.slice(k.length + 1)
+    const item = resolutions.find((x) => x.kind === k && x.id === id)
+    if (item !== undefined) return { item }
+  }
+
+  const matches = resolutions.filter((x) => x.id === query)
+  if (matches.length > 1) {
+    return { ambiguous: [...new Set(matches.map((m) => m.kind))].sort() }
+  }
+  return { item: matches[0] }
 }
 
 export async function diffCommand(
@@ -30,13 +59,24 @@ export async function diffCommand(
   }
 
   const { resolutions, store } = await gather(opts)
-  const r = resolutions.find((x) => x.id === id)
+  const found = selectItem(resolutions, id)
+  if ('ambiguous' in found) {
+    const msg =
+      `${id} names more than one item (${found.ambiguous.join(', ')}); ` +
+      `say which with \`syncskills diff ${found.ambiguous[0]}/${id}\``
+    if (io.json) emitJsonError('diff', msg, io)
+    else process.stderr.write(`syncskills: ${msg}\n`)
+    return EXIT.ERROR
+  }
+  const r = found.item
   if (r === undefined) {
     const msg = `no item named ${id}; run \`syncskills status\` to see what exists`
     if (io.json) emitJsonError('diff', msg, io)
     else process.stderr.write(`syncskills: ${msg}\n`)
     return EXIT.ERROR
   }
+  // Every path below reads the item by its own id, not by what was typed.
+  id = r.id
 
   if (r.kind === 'skill') {
     const localFiles = await readTree(join(opts.paths.skillsDir, id))

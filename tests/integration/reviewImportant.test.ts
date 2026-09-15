@@ -142,3 +142,42 @@ describe('the JSON envelope agrees with the exit code', () => {
     expect(text).toMatch(/would push-content/)
   })
 })
+
+/**
+ * A `set-apps` action whose matrix already matches the database is a write of
+ * the value that is already there. The merged-matrix path skips exactly that,
+ * but the action path wrote unconditionally — and for an EMPTY matrix the write
+ * goes through the database, which refuses while cc-switch is open. The result
+ * was an item that failed on every run, forever, with nothing actually wrong.
+ */
+describe('an app matrix that is already correct', () => {
+  let a: Device
+  let b: Device
+
+  beforeEach(async () => {
+    const remote = await makeBareRemote()
+    a = await makeDevice('a', remote)
+    b = await makeDevice('b', remote)
+    await a.writeSkill('s', '---\nname: s\ndescription: d\n---\nS\n', ['claude'])
+    await a.sync()
+    await b.sync()
+  })
+
+  it('is not rewritten while cc-switch holds the database', async () => {
+    // Disabled everywhere here; the other device still has it on for claude,
+    // so the merged matrix is empty and the decision is a push.
+    a.setSkillApps('s', [])
+    const outcome = await a.sync({ isCcSwitchRunning: async () => true })
+
+    expect(outcome.result.failed.map((f) => f.error)).toEqual([])
+    expect(a.readSkillApps('s')).toEqual([])
+  })
+
+  it('still publishes the matrix it did not need to write', async () => {
+    a.setSkillApps('s', [])
+    await a.sync({ isCcSwitchRunning: async () => true })
+    await b.sync()
+
+    expect(b.readSkillApps('s')).toEqual([])
+  })
+})

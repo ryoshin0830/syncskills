@@ -100,7 +100,12 @@ export function createGitStore(opts: {
       } else {
         const fetched = await run(git, ['-C', dir, 'fetch', 'origin', branch])
         if (fetched.code === 0) {
-          await g(['checkout', '-B', branch, `origin/${branch}`], 'checkout')
+          // -f, because the cache is scratch and may be dirty: a run that died
+          // between writing item files and committing leaves modified tracked
+          // files, and a plain `checkout -B` refuses to overwrite them — which
+          // threw before reaching the reset below and wedged every later
+          // command with no way out but deleting the cache by hand.
+          await g(['checkout', '-f', '-B', branch, `origin/${branch}`], 'checkout')
           await g(['reset', '--hard', `origin/${branch}`], 'reset')
         } else {
           // The remote branch does not exist yet; keep whatever we have.

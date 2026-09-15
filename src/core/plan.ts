@@ -69,12 +69,7 @@ export function buildPlan(resolutions: Resolution[]): Plan {
     else actions.push(action)
   }
 
-  actions.sort((a, b) => {
-    const d = ORDER.indexOf(a.type) - ORDER.indexOf(b.type)
-    if (d !== 0) return d
-    if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
-  })
+  sortActions(actions)
   conflicts.sort((a, b) =>
     a.kind !== b.kind ? (a.kind < b.kind ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   )
@@ -84,4 +79,48 @@ export function buildPlan(resolutions: Resolution[]): Plan {
   )
 
   return { actions, conflicts, inSync, counts }
+}
+
+/**
+ * Put actions in the order they have to run in. Exported because a conflict
+ * resolved interactively joins the plan after it was first built, and appending
+ * it would silently break the ordering the plan depends on.
+ */
+export function sortActions(actions: Action[]): Action[] {
+  return actions.sort((a, b) => {
+    const d = ORDER.indexOf(a.type) - ORDER.indexOf(b.type)
+    if (d !== 0) return d
+    if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+  })
+}
+
+/**
+ * Settle one conflict by taking a side, in place.
+ *
+ * Both callers — the interactive interface and a resolver handed to runSync —
+ * go through here, so "what choosing a side means" has exactly one definition.
+ */
+/**
+ * Turn a conflict into the ordinary action that carries out the choice.
+ *
+ * Skills can be merged; an MCP server or a repository cannot be merged line by
+ * line, so the only honest offer is "keep mine" or "take theirs". Expressing
+ * that as a normal action rather than a second write path is what keeps the
+ * base, the manifest and the stored credentials consistent afterwards — every
+ * one of those records lives in applyOne() and nowhere else.
+ */
+export function takeSide(plan: Plan, action: Action, side: 'local' | 'remote'): void {
+  plan.actions.push(resolveConflictAs(action, side))
+  // The plan was ordered when it was built, and the order is load-bearing.
+  sortActions(plan.actions)
+}
+
+export function resolveConflictAs(action: Action, side: 'local' | 'remote'): Action {
+  const { resolution } = action
+  const type: ActionType =
+    side === 'local'
+      ? resolution.local === undefined ? 'delete-remote' : 'push-content'
+      : resolution.remote === undefined ? 'delete-local' : 'pull-content'
+  return { ...action, type }
 }

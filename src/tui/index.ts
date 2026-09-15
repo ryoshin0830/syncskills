@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
-import { gather, narrowByDirection } from '../engine.js'
-import { buildPlan } from '../core/plan.js'
+import { gather, narrowByDirection, assertSecretsReadable } from '../engine.js'
+import { buildPlan, takeSide } from '../core/plan.js'
 import { applyPlan, assertNoSecrets } from '../core/apply.js'
 import { createWriter } from '../ccswitch/write.js'
 import { saveState } from '../state.js'
@@ -54,7 +54,11 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
   const spin = p.spinner()
   spin.start('Comparing this device with the remote')
-  const { resolutions, store, manifest, state, blob, secrets } = await gather(opts)
+  const gathered = await gather(opts)
+  // Before anything is shown, let alone written: a merge publishes the blob
+  // like any other run, and an unread blob published is every credential lost.
+  assertSecretsReadable(opts, gathered)
+  const { resolutions, store, manifest, state, blob, secrets, secretsUnreadable } = gathered
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
   spin.stop('Comparison complete')
 
@@ -83,6 +87,12 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
   // ---- conflicts first: nothing else is applied until these are settled ----
   const stillUnresolved: Action[] = []
+  /**
+   * Conflicts the user settled by choosing a side, queued as ordinary actions.
+   * Kept separately because nothing is written for them until the apply step is
+   * confirmed — declining it has to put them back, not report them as done.
+   */
+  const queuedFromConflicts: Action[] = []
   let resolvedAny = false
 
   /**
@@ -91,7 +101,8 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
    * runSync() for why the state is deliberately left unsaved in that case.
    */
   async function publish(applied: number, result?: ApplyResult): Promise<PublishOutcome> {
-    if (opts.useSecrets) await secrets.write(blob)
+    // See runSync: a blob that was never read is never written back.
+    if (opts.useSecrets && secretsUnreadable === undefined) await secrets.write(blob)
     await store.writeManifest(manifest)
     try {
       const ok = await store.commitAndPush(
@@ -112,7 +123,42 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
     const agent = await pickAgent(opts.mergeAgent)
 
     for (const c of plan.conflicts) {
+      // An MCP server and a repository are a config object and a row, not text:
+      // there is no line-based merge to offer. Saying so and asking which side
+      // wins is the whole resolution — dropping them here silently is what used
+      // to make `sync` report the same conflict forever with no way out.
       if (c.kind !== 'skill') {
+        const pick = answer<string>(await p.select({
+          message: `${c.kind}/${c.id} changed on both machines. ` +
+                   `It cannot be merged line by line — which side wins?`,
+          options: [
+            { value: 'skip', label: 'Decide later (leave both as they are)' },
+            { value: 'local', label: 'Keep this device’s version' },
+            { value: 'remote', label: 'Take the other device’s version' },
+          ],
+        }))
+        if (pick === 'skip') {
+          stillUnresolved.push(c)
+          continue
+        }
+        if (opts.dryRun) {
+          p.log.info(`${c.kind}/${c.id}: would take the ${pick} version (dry run, nothing written)`)
+          stillUnresolved.push(c)
+          continue
+        }
+        // Carried out as the ordinary action it amounts to, so the base, the
+        // manifest and the stored credentials are recorded exactly once.
+        takeSide(plan, c, pick as 'local' | 'remote')
+        queuedFromConflicts.push(c)
+        continue
+      }
+
+      // A dry run is described as changing nothing, and both of the next two
+      // lines change something: the snapshot lands in the config directory and
+      // the merge writes a tree into the cache — which is exactly why applyPlan
+      // skips its backup on a dry run. Nothing here is written either.
+      if (opts.dryRun) {
+        p.log.info(`${c.id}: would be merged interactively (dry run, nothing written)`)
         stillUnresolved.push(c)
         continue
       }
@@ -182,11 +228,6 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
       const source = choice === 'accept' ? outDir : choice === 'remote' ? remoteDir : localDir
 
-      if (opts.dryRun) {
-        p.log.info(`${c.id}: would take the ${choice} version (dry run, nothing written)`)
-        continue
-      }
-
       // A merge can pull a credential in from either side, so the resolved tree
       // faces the same gate as any other push. A secret in git history cannot
       // be taken back.
@@ -228,6 +269,9 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       // the plan must not throw that away: without publishing here the resolved
       // item has no base and no manifest entry, and the next run sees the same
       // conflict again.
+      // A side chosen above was never written; it goes back to unresolved
+      // rather than being reported as settled by an exit code of 0.
+      stillUnresolved.push(...queuedFromConflicts)
       if (resolvedAny && !opts.dryRun) {
         const out = await publish(0)
         if (out.rejected !== undefined) {

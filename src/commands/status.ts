@@ -10,8 +10,19 @@ import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
 
 export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
-  const { resolutions, unsafeLocalIds, staleSecrets, manifest } = await gather(opts)
+  const { resolutions, unsafeLocalIds, staleSecrets, manifest, secretsUnreadable } =
+    await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  // status changes nothing, so an unreachable store is reported rather than
+  // fatal — but it must be reported, or the MCP rows below are read against a
+  // blob that is empty for the wrong reason.
+  if (opts.useSecrets && secretsUnreadable !== undefined) {
+    io.warnings.push(
+      `could not read the credential store: ${secretsUnreadable}; ` +
+      `MCP credentials could not be checked, and a sync will refuse to run until it is reachable`,
+    )
+  }
 
   for (const s of staleSecrets) {
     io.warnings.push(

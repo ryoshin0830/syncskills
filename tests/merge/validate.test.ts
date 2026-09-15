@@ -55,3 +55,31 @@ describe('validateMerged', () => {
     expect(validateMerged('scripts/run.sh', 'echo hi\n')).toEqual({ ok: true })
   })
 })
+
+/**
+ * `=======` on its own is ordinary Markdown — a setext heading underline, or a
+ * section rule — and SKILL.md is Markdown. Reading it as a conflict marker
+ * rejected clean, correct merges, sent them to the AI agent for no reason, and
+ * reported them unresolved when the agent's output contained the same line.
+ * Every real conflict carries `<<<<<<< ` and `>>>>>>> `, which are still checked.
+ */
+describe('a line of equals signs in ordinary Markdown', () => {
+  it('is not a conflict marker under a setext heading', () => {
+    expect(hasConflictMarkers('Overview\n=======\n\nBody\n')).toBe(false)
+  })
+
+  it('does not make a valid SKILL.md invalid', () => {
+    const md = '---\nname: s\ndescription: d\n---\n\nOverview\n=======\n\nBody\n'
+    expect(validateMerged('SKILL.md', md)).toEqual({ ok: true })
+  })
+
+  it('still catches a real conflict, which always has the outer markers', () => {
+    const text = '<<<<<<< local\nmine\n=======\ntheirs\n>>>>>>> remote\n'
+    expect(hasConflictMarkers(text)).toBe(true)
+  })
+
+  it('still catches the diff3 base section', () => {
+    const text = '<<<<<<< local\nmine\n||||||| base\nwas\n=======\ntheirs\n>>>>>>> remote\n'
+    expect(hasConflictMarkers(text)).toBe(true)
+  })
+})

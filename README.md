@@ -34,18 +34,24 @@ home Mac ──┘         (skills, MCP,          │
   A remote that has moved on is never overwritten — that is a structural property of the
   decision table, not a timestamp comparison, so clock skew and `git clone`'s mtime reset
   cannot affect it.
-- **Conflicts keep both sides.** `git merge-file` resolves non-overlapping edits for free
-  and identically on every machine. Only genuine overlap reaches an AI agent
+- **Conflicts keep both sides.** For a skill, `git merge-file` resolves non-overlapping
+  edits for free and identically on every machine. Only genuine overlap reaches an AI agent
   (`claude -p` or `codex exec`), which is asked to preserve both contributions. Nothing it
   returns is written unless it validates, and both original versions are saved first.
-  Merging happens in the interactive interface only — run `npx syncskills` with no
+  Resolving happens in the interactive interface only — run `npx syncskills` with no
   arguments — where the merged result is shown to you before it is written. `sync`,
   `push` and `pull` report a conflict, leave both sides intact, and exit 2.
+  An MCP server or a repository is a config object, not text, so there is no line-based
+  merge to offer: the interactive interface asks which side wins and carries that out as
+  an ordinary push or pull.
   Binary files are never merged line by line: if both machines changed one, it is
   reported rather than resolved, and the executable bit travels with the content.
 - **No secrets in git, ever.** MCP `env` values live in a single 1Password secure note
   reached with a service-account token. The repository holds key names only. Every file
-  staged for a push is scanned for credentials as a backstop.
+  staged for a push is scanned for credentials as a backstop. A run that cannot *read*
+  that note stops rather than continuing: an unread blob written back would replace every
+  stored credential with nothing, and env values are outside the content hash, so no later
+  run would notice.
 - **Built for people and for agents.** Run it bare for an interactive review; pass flags
   and `--json` to drive it from a script. Exit codes say what happened.
 
@@ -106,7 +112,7 @@ For each item, with `B` = what both sides last agreed on, `L` = this machine,
 | — | — | X | pull, it is new there |
 | A | — | A | delete on the remote too |
 | A | A | — | delete here too |
-| A | **X** | **Y** | **conflict** → reported; merge it interactively, keeping both |
+| A | **X** | **Y** | **conflict** → reported; resolve it interactively |
 | A | — | **Y** | **conflict** — you deleted it, they changed it |
 
 The app matrix — which harnesses each item is enabled for — resolves separately, so a

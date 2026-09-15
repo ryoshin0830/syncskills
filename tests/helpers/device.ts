@@ -34,6 +34,13 @@ export interface Device {
   ccBin: string
 
   sync(over?: Partial<EngineOptions>): Promise<SyncOutcome>
+  /**
+   * Run a sync in which every conflict is settled by taking one side, exactly
+   * as the interactive interface does it: resolveConflictAs() turns the choice
+   * into an ordinary action, and applyPlan carries it out. Only the prompt is
+   * replaced.
+   */
+  syncTakingSide(side: 'local' | 'remote'): Promise<SyncOutcome>
   push(): Promise<SyncOutcome>
   pull(): Promise<SyncOutcome>
   /** Run the `sync` COMMAND, capturing what a user or a script would see. */
@@ -122,6 +129,8 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
     name, configDir, paths, ccBin,
 
     sync: (over) => runSync(options(over)),
+
+    syncTakingSide: (side) => runSync(options({ resolveConflict: () => side })),
 
     async runSyncCommand({ json = false, dryRun = false } = {}) {
       const { syncCommand } = await import('../../src/commands/sync.js')

@@ -161,3 +161,33 @@ describe('GitStore', () => {
     await expect(s.ensure()).rejects.toThrow(/could not clone/)
   })
 })
+
+/**
+ * The cache is scratch, and a run that died between writing item files and
+ * committing leaves it dirty. `checkout -B` refuses to overwrite local
+ * modifications, so ensure() threw before reaching the `reset --hard` that
+ * would have cleaned up — wedging every command that calls gather().
+ */
+describe('a cache left dirty by a run that died', () => {
+  it('is cleaned up instead of wedging every later command', async () => {
+    const remote = await makeBareRemote()
+    const cacheDir = await mkdtemp(join(tmpdir(), 'ss-cache-'))
+    const store = createGitStore({ cacheDir, config: base, remoteOverride: remote })
+    await store.ensure()
+
+    // Someone else publishes, so origin/main moves on.
+    const other = await mkdtemp(join(tmpdir(), 'ss-other-'))
+    await run('git', ['clone', remote, other])
+    await run('git', ['-C', other, 'config', 'user.email', 't@example.com'])
+    await run('git', ['-C', other, 'config', 'user.name', 'test'])
+    await writeFile(join(other, 'README.md'), '# moved on\n')
+    await run('git', ['-C', other, 'commit', '-am', 'move on'])
+    await run('git', ['-C', other, 'push', 'origin', 'main'])
+
+    // This machine crashed mid-apply: a tracked file is modified, uncommitted.
+    await writeFile(join(cacheDir, 'repo', 'README.md'), '# half-written\n')
+
+    await expect(store.ensure()).resolves.toBeUndefined()
+    expect(await readFile(join(cacheDir, 'repo', 'README.md'), 'utf8')).toBe('# moved on\n')
+  })
+})

@@ -164,8 +164,11 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
   switch (action.type) {
     case 'set-apps': {
-      if (kind === 'skill') await ctx.writer.setSkillApps(id, resolution.apps)
-      else if (kind === 'mcp') await ctx.writer.setMcpApps(id, resolution.apps)
+      // Only when it differs — see applyMergedApps. A matrix the database
+      // already holds needs publishing, not writing, and writing an EMPTY one
+      // goes through the database, which refuses while cc-switch is open. That
+      // turned a no-op into an item that failed on every run for good.
+      await applyMergedApps(ctx, action)
 
       const side = { contentHash: resolution.local!.contentHash, apps: resolution.apps }
       setBase(ctx.state, kind, id, side)

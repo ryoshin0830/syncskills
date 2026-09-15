@@ -1,5 +1,12 @@
+/**
+ * The outer markers only. A bare `=======` is ordinary Markdown — a setext
+ * heading underline, a section rule — and SKILL.md is Markdown, so treating it
+ * as a marker rejected clean merges. Every real conflict git or an agent can
+ * produce is bracketed by `<<<<<<< ` and `>>>>>>> `; the `||||||| ` line that
+ * --diff3 adds is checked too, since it is never ordinary text.
+ */
 export function hasConflictMarkers(text: string): boolean {
-  return /^<{7}[ \t]/m.test(text) || /^={7}\s*$/m.test(text) || /^>{7}[ \t]/m.test(text)
+  return /^<{7}[ \t]/m.test(text) || /^\|{7}[ \t]/m.test(text) || /^>{7}[ \t]/m.test(text)
 }
 
 export type Validation = { ok: true } | { ok: false; reason: string }

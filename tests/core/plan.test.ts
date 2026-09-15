@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildPlan } from '../../src/core/plan.js'
+import { buildPlan, resolveConflictAs, sortActions } from '../../src/core/plan.js'
+import type { Action } from '../../src/core/plan.js'
 import { resolveItem } from '../../src/core/resolve.js'
 import type { Side } from '../../src/core/types.js'
 
@@ -137,5 +138,87 @@ describe('buildPlan — items that already agree', () => {
   it('returns them sorted for stable output', () => {
     const p = buildPlan([r('z', S('A'), S('A'), S('A')), r('a', S('A'), S('A'), S('A'))])
     expect(p.inSync.map((x) => x.id)).toEqual(['a', 'z'])
+  })
+})
+
+/**
+ * A conflict on an MCP server or a repository has no line-based merge to offer,
+ * but "there is no way out of this" is not an acceptable answer either: the
+ * interactive interface used to drop every non-skill conflict on the floor
+ * without so much as a prompt, so `sync` kept reporting it forever.
+ *
+ * Choosing a side turns the conflict into the ordinary action that expresses
+ * it, which is what makes every base, manifest and secret record correct
+ * afterwards rather than a second implementation of the same thing.
+ */
+describe('choosing a side for a conflict', () => {
+  const both = (kind: 'mcp' | 'repo' | 'skill'): Action => ({
+    type: 'merge', kind, id: 'x',
+    resolution: {
+      kind, id: 'x', decision: 'CONFLICT', conflictKind: 'both-edited',
+      appsDecision: 'IN_SYNC', apps: ['claude'],
+      base: side('a'), local: side('b'), remote: side('c'),
+    },
+  })
+
+  function side(h: string): Side {
+    return { contentHash: h, apps: ['claude'] }
+  }
+
+  it('keeps this machine by pushing it', () => {
+    expect(resolveConflictAs(both('mcp'), 'local').type).toBe('push-content')
+  })
+
+  it('takes the other machine by pulling it', () => {
+    expect(resolveConflictAs(both('mcp'), 'remote').type).toBe('pull-content')
+  })
+
+  it('keeps this machine by deleting on the remote when it was deleted here', () => {
+    const a = both('mcp')
+    const r = { ...a.resolution, conflictKind: 'local-deleted' as const, local: undefined }
+    expect(resolveConflictAs({ ...a, resolution: r }, 'local').type).toBe('delete-remote')
+  })
+
+  it('takes the other machine by deleting here when they deleted it', () => {
+    const a = both('mcp')
+    const r = { ...a.resolution, conflictKind: 'remote-deleted' as const, remote: undefined }
+    expect(resolveConflictAs({ ...a, resolution: r }, 'remote').type).toBe('delete-local')
+  })
+
+  it('leaves the item and its resolution untouched', () => {
+    const a = both('repo')
+    const out = resolveConflictAs(a, 'local')
+    expect(out.kind).toBe('repo')
+    expect(out.id).toBe('x')
+    expect(out.resolution).toBe(a.resolution)
+  })
+})
+
+/**
+ * A conflict resolved interactively joins a plan that was already ordered, and
+ * the order is load-bearing: pulls run before pushes so a rejected push cannot
+ * strand a decided pull, and deletes on the remote run last.
+ */
+describe('sortActions', () => {
+  const act = (type: Action['type'], id: string): Action => ({
+    type, kind: 'mcp', id,
+    resolution: {
+      kind: 'mcp', id, decision: 'CONFLICT', appsDecision: 'IN_SYNC', apps: [],
+    },
+  })
+
+  it('puts a late-arriving pull ahead of an existing push', () => {
+    const out = sortActions([act('push-content', 'a'), act('pull-content', 'b')])
+    expect(out.map((a) => a.type)).toEqual(['pull-content', 'push-content'])
+  })
+
+  it('leaves a remote deletion last', () => {
+    const out = sortActions([act('delete-remote', 'a'), act('pull-content', 'b')])
+    expect(out.map((a) => a.type)).toEqual(['pull-content', 'delete-remote'])
+  })
+
+  it('is stable on id within one type', () => {
+    const out = sortActions([act('push-content', 'z'), act('push-content', 'a')])
+    expect(out.map((a) => a.id)).toEqual(['a', 'z'])
   })
 })

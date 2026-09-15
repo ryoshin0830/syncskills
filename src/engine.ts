@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import { resolveAll } from './core/resolve.js'
-import { buildPlan } from './core/plan.js'
+import { buildPlan, takeSide } from './core/plan.js'
 import { applyPlan } from './core/apply.js'
 import { createGitStore, PushRejected } from './store/git.js'
 import { dropBaseTree } from './basetree.js'
@@ -44,12 +44,19 @@ export function narrowByDirection(plan: Plan, direction: Direction): Plan {
   if (direction === 'both') return plan
   const keep = direction === 'push' ? OUTBOUND : INBOUND
   const keepApps = direction === 'push' ? APPS_OUTBOUND : APPS_INBOUND
-  return {
-    ...plan,
-    actions: plan.actions.filter((a) =>
-      a.type === 'set-apps' ? keepApps.has(a.resolution.appsDecision) : keep.has(a.type),
-    ),
+  const actions = plan.actions.filter((a) =>
+    a.type === 'set-apps' ? keepApps.has(a.resolution.appsDecision) : keep.has(a.type),
+  )
+  // Recounted, not carried over. `counts` is what `--json` reports and what the
+  // interface summarises, so leaving the pre-narrowing numbers there told a
+  // script that `push` had pulls to make.
+  const counts = { ...plan.counts }
+  for (const t of Object.keys(counts) as (keyof typeof counts)[]) {
+    if (t === 'merge' || t === 'noop') continue
+    counts[t] = 0
   }
+  for (const a of actions) counts[a.type]++
+  return { ...plan, actions, counts }
 }
 
 export interface EngineOptions {
@@ -68,6 +75,14 @@ export interface EngineOptions {
   ccBin?: string
   /** Override how the cc-switch process is detected. Tests only. */
   isCcSwitchRunning?: () => Promise<boolean>
+  /** Use a different credential store instead of 1Password. Tests only. */
+  secretProvider?: SecretProvider
+  /**
+   * Settle conflicts by taking a side instead of reporting them. The
+   * interactive interface asks the user; this is the same decision made without
+   * one, which is what lets it be tested without a terminal.
+   */
+  resolveConflict?: (action: Action) => 'local' | 'remote' | 'skip'
 }
 
 const ALL_KINDS: ItemKind[] = ['skill', 'mcp', 'repo']
@@ -94,6 +109,16 @@ export interface Gathered {
   state: StateFile
   blob: SecretBlob
   secrets: SecretProvider
+  /**
+   * Why the credential store could not be read, when it could not be.
+   *
+   * `blob` is empty in that case, and an empty blob is indistinguishable from
+   * "there are no credentials" — which is why this is reported separately
+   * rather than inferred. Writing an unread blob back would replace every
+   * stored credential with nothing, and env values are excluded from the
+   * content hash, so no later run would notice or retry.
+   */
+  secretsUnreadable?: string
 }
 
 export async function gather(opts: EngineOptions): Promise<Gathered> {
@@ -108,10 +133,17 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
   const state = await loadState(opts.configDir)
 
   const secrets: SecretProvider =
-    opts.useSecrets && opts.token !== undefined && opts.token !== ''
+    opts.secretProvider ??
+    (opts.useSecrets && opts.token !== undefined && opts.token !== ''
       ? onePasswordProvider({ vault: opts.config.vault, item: opts.config.item, token: opts.token })
-      : nullProvider()
-  const blob = await secrets.read().catch(() => emptyBlob())
+      : nullProvider())
+  // A read that fails is not a read that returned nothing. The distinction is
+  // kept rather than flattened, because the caller has to refuse to write.
+  let secretsUnreadable: string | undefined
+  const blob = await secrets.read().catch((e: Error) => {
+    secretsUnreadable = e.message
+    return emptyBlob()
+  })
 
   const kinds = opts.only ?? ALL_KINDS
   const excluded = new Set(opts.config.excludes)
@@ -160,7 +192,10 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
     }
   }
 
-  return { resolutions, store, manifest, state, blob, secrets, unsafeLocalIds, staleSecrets }
+  return {
+    resolutions, store, manifest, state, blob, secrets, unsafeLocalIds, staleSecrets,
+    ...(secretsUnreadable === undefined ? {} : { secretsUnreadable }),
+  }
 }
 
 export interface SyncOutcome {
@@ -199,9 +234,47 @@ export function blankCredentials(paths: CcPaths): { id: string; keys: string[] }
   return out
 }
 
+/**
+ * Refuse to go on when the credential store answered with an error.
+ *
+ * Everything downstream treats `blob` as the truth: a pull rehydrates an MCP
+ * server's env from it, and the publish step writes it back whole. Both of
+ * those turn "1Password was briefly unreachable" into "every credential on
+ * every machine is gone", silently, because env values are deliberately
+ * outside the content hash and so nothing would ever retry.
+ */
+export function assertSecretsReadable(opts: EngineOptions, g: Gathered): void {
+  if (!opts.useSecrets || g.secretsUnreadable === undefined) return
+  // Only MCP servers own a credential. A skills-or-repos-only run has nothing
+  // to rehydrate and nothing to store, which is why the message below can offer
+  // it as the way to keep working; writing the blob is skipped there too.
+  if (!(opts.only ?? ALL_KINDS).includes('mcp')) return
+  throw new Error(
+    `could not read the credential store: ${g.secretsUnreadable}. ` +
+    `Nothing was changed. Syncing now would overwrite the stored credentials ` +
+    `with nothing, so this run stops here; fix the store and try again, or ` +
+    `sync the rest meanwhile with \`--only skills,repo\`.`,
+  )
+}
+
 export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
-  const { resolutions, store, manifest, state, blob, secrets, staleSecrets } = await gather(opts)
+  const gathered = await gather(opts)
+  assertSecretsReadable(opts, gathered)
+  const {
+    resolutions, store, manifest, state, blob, secrets, staleSecrets, secretsUnreadable,
+  } = gathered
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  if (opts.resolveConflict !== undefined) {
+    const settled: Action[] = []
+    for (const c of plan.conflicts) {
+      const side = opts.resolveConflict(c)
+      if (side === 'skip') continue
+      takeSide(plan, c, side)
+      settled.push(c)
+    }
+    plan.conflicts = plan.conflicts.filter((c) => !settled.includes(c))
+  }
 
   const writer = createWriter({
     paths: opts.paths,
@@ -244,7 +317,10 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
     // empty credential from a blob that was never written. Publishing the
     // manifest only after the secrets it refers to are safely stored means a
     // failure here simply leaves the remote unchanged.
-    if (opts.useSecrets) await secrets.write(blob)
+    // Never a blob that was not read: the guard above lets a skills-only run
+    // through, and an empty blob written there would still destroy every stored
+    // credential. Belt as well as braces, because the cost is unrecoverable.
+    if (opts.useSecrets && secretsUnreadable === undefined) await secrets.write(blob)
     await store.writeManifest(manifest)
     try {
       pushed = await store.commitAndPush(

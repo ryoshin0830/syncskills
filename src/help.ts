@@ -95,8 +95,9 @@ FLAGS
 
 Conflicts are NOT merged here. This command never rewrites an item out of two
 versions on its own; it reports the conflict and moves on, leaving both sides
-intact. Run \`syncskills\` with no arguments to merge one interactively, where
-the result is shown before it is written.
+intact. Run \`syncskills\` with no arguments to resolve one interactively: a
+skill is merged there, with the result shown before it is written, and an MCP
+server or a repository — which have no line-based merge — asks which side wins.
 
 EXIT CODES
   1 when an item could not be applied, or when another device published to the

@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { run } from '../../src/util/exec.js'
 
 describe('run', () => {
@@ -29,6 +32,38 @@ describe('run', () => {
     const r = await run('sh', ['-c', 'echo done'], { input: big })
     expect(r.code).toBe(0)
     expect(r.stdout.trim()).toBe('done')
+  })
+
+  /**
+   * A Buffer added to a string decodes that chunk on its own, so a multi-byte
+   * character straddling a 64KB pipe boundary became U+FFFD. This output is not
+   * for display: mergeFile() and the merge agents return it as the merged text,
+   * which is written into the skill and pushed to every other machine.
+   */
+  it('keeps multi-byte characters intact across chunk boundaries', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ss-utf8-'))
+    const file = join(dir, 'big.txt')
+    const text = 'あ'.repeat(200_000) + '\n'
+    await writeFile(file, text)
+
+    const r = await run('cat', [file])
+
+    expect(r.stdout.includes('\uFFFD')).toBe(false)
+    expect(r.stdout).toBe(text)
+  })
+
+  it('keeps multi-byte characters intact on stderr too', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ss-utf8e-'))
+    const file = join(dir, 'big.txt')
+    // Three bytes, so it does not divide the 64KB pipe buffer evenly and is
+    // guaranteed to straddle a boundary; a 4-byte character would not.
+    const text = 'あ'.repeat(200_000) + '\n'
+    await writeFile(file, text)
+
+    const r = await run('sh', ['-c', `cat ${JSON.stringify(file)} >&2`])
+
+    expect(r.stderr.includes('\uFFFD')).toBe(false)
+    expect(r.stderr).toBe(text)
   })
 
   it('rejects when the binary does not exist', async () => {
