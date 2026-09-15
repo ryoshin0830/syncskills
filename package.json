@@ -16,6 +16,10 @@
     "README.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ryoshin0830/syncskills.git"
