@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseArgs, unknownFlags, packageVersion, EXIT } from '../src/cli.js'
-import { parseOnly } from '../src/dispatch.js'
+import { parseOnly } from '../src/flags.js'
 
 describe('parseArgs', () => {
   it('defaults to the tui command when given no arguments', () => {
@@ -32,7 +32,7 @@ describe('parseArgs', () => {
   })
 
   it('fixes the exit code contract', () => {
-    expect(EXIT).toEqual({ OK: 0, ERROR: 1, CONFLICT: 2, UNINITIALIZED: 3 })
+    expect(EXIT).toEqual({ OK: 0, ERROR: 1, CONFLICT: 2, UNINITIALIZED: 3, CANCELLED: 130 })
   })
 })
 

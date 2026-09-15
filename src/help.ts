@@ -1,17 +1,15 @@
-const GLOBAL = `GLOBAL FLAGS
+const GLOBAL = `GLOBAL FLAGS  (accepted by every command)
   --json                 machine-readable output
-  --yes, -y              assume yes; never prompt
-  --dry-run              show what would happen; change nothing
-  --only <kinds>         limit to skills, mcp or repos (comma separated)
-  --merge-agent <name>   claude | codex | none   (default: auto; interactive only)
-  --no-secrets           do not touch 1Password
   --profile <name>       use an alternate configuration
   --config <dir>         configuration directory (default: ~/.config/syncskills)
   --version              print the version
   --verbose, -v          more detail
   --quiet, -q            errors only
-  --no-tui               never enter interactive mode
-  --help, -h             show help`
+  --help, -h             show help
+
+Other flags belong to particular commands and are refused elsewhere — see the
+per-command help. \`--merge-agent\` in particular is read only by the
+interactive interface, which is the only place a merge happens.`
 
 export const ROOT_HELP = `syncskills — keep AI agent skills and MCP servers identical across your machines.
 
@@ -36,10 +34,11 @@ COMMANDS
 ${GLOBAL}
 
 EXIT CODES
-  0  success
-  1  error
-  2  unresolved conflicts, or an action awaiting manual intervention
-  3  not initialized — run \`syncskills init\`
+  0    success
+  1    error
+  2    unresolved conflicts, or an action awaiting manual intervention
+  3    not initialized — run \`syncskills init\`
+  130  cancelled with Ctrl-C; nothing was changed
 
 MERGING
   Conflicts are merged in the interactive interface only, where the merged
@@ -91,6 +90,7 @@ FLAGS
   --yes, -y            apply without prompting
   --dry-run            show the plan and stop
   --only <kinds>       skills, mcp, repos
+  --no-secrets         do not touch 1Password
   --json               machine-readable result
 
 Conflicts are NOT merged here. This command never rewrites an item out of two
@@ -99,6 +99,9 @@ intact. Run \`syncskills\` with no arguments to merge one interactively, where
 the result is shown before it is written.
 
 EXIT CODES
+  1 when an item could not be applied, or when another device published to the
+    store first — in which case nothing was sent and running sync again picks
+    up from where the other device left off.
   2 when an item is in conflict, or is waiting for you to finish it by hand.
 
 EXAMPLES
@@ -116,6 +119,7 @@ every item. Changes nothing, touches no files, and is safe to run at any time.
 
 FLAGS
   --only <kinds>   skills, mcp, repos
+  --no-secrets     do not touch 1Password
   --json           machine-readable result
 
 EXAMPLES
@@ -131,9 +135,11 @@ Applies only outbound actions. Items that changed on the remote are reported
 and left alone; conflicts are still detected and reported.
 
 FLAGS
-  --yes, -y   apply without prompting
-  --dry-run   show the plan and stop
-  --json      machine-readable result
+  --yes, -y        apply without prompting
+  --dry-run        show the plan and stop
+  --only <kinds>   skills, mcp, repos
+  --no-secrets     do not touch 1Password
+  --json           machine-readable result
 
 EXAMPLES
   syncskills push --dry-run
@@ -148,9 +154,11 @@ Applies only inbound actions. Local-only changes are left untouched and
 reported, so nothing you have here is lost.
 
 FLAGS
-  --yes, -y   apply without prompting
-  --dry-run   show the plan and stop
-  --json      machine-readable result
+  --yes, -y        apply without prompting
+  --dry-run        show the plan and stop
+  --only <kinds>   skills, mcp, repos
+  --no-secrets     do not touch 1Password
+  --json           machine-readable result
 
 EXAMPLES
   syncskills pull --yes

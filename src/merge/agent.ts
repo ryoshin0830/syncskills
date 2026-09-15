@@ -2,6 +2,13 @@ import { run } from '../util/exec.js'
 
 export interface MergeRequest { path: string; base: string; local: string; remote: string }
 
+/**
+ * How long to wait for an agent to answer. Long enough for a real merge of a
+ * large skill, short enough that a process which has quietly stopped talking
+ * degrades to `unresolved` instead of hanging the interface.
+ */
+const AGENT_TIMEOUT_MS = 120_000
+
 export interface MergeAgent {
   name: string
   merge(req: MergeRequest): Promise<string>
@@ -41,7 +48,9 @@ export function claudeAgent(bin = 'claude'): MergeAgent {
   return {
     name: 'claude',
     async merge(req) {
-      const r = await run(bin, ['-p', '--permission-mode', 'plan'], { input: PROMPT(req) })
+      const r = await run(bin, ['-p', '--permission-mode', 'plan'], {
+        input: PROMPT(req), timeoutMs: AGENT_TIMEOUT_MS,
+      })
       if (r.code !== 0) {
         throw new Error(`claude merge failed: ${r.stderr.trim() || r.stdout.trim()}`)
       }
@@ -54,7 +63,9 @@ export function codexAgent(bin = 'codex'): MergeAgent {
   return {
     name: 'codex',
     async merge(req) {
-      const r = await run(bin, ['exec', '--skip-git-repo-check', '-'], { input: PROMPT(req) })
+      const r = await run(bin, ['exec', '--skip-git-repo-check', '-'], {
+        input: PROMPT(req), timeoutMs: AGENT_TIMEOUT_MS,
+      })
       if (r.code !== 0) {
         throw new Error(`codex merge failed: ${r.stderr.trim() || r.stdout.trim()}`)
       }

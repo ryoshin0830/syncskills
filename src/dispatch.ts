@@ -3,6 +3,7 @@ import { configDir, loadConfig } from './config.js'
 import { resolveCcPaths } from './ccswitch/paths.js'
 import { readToken } from './engine.js'
 import { emitJsonError } from './output.js'
+import { Cancelled } from './prompt.js'
 import { statusCommand } from './commands/status.js'
 import { syncCommand } from './commands/sync.js'
 import { doctorCommand } from './commands/doctor.js'
@@ -13,6 +14,7 @@ import { conflictsCommand } from './commands/conflicts.js'
 import { diffCommand } from './commands/diff.js'
 import type { ParsedArgs } from './cli.js'
 import type { Io } from './output.js'
+import { parseOnly, parseAgent } from './flags.js'
 import type { EngineOptions, Direction } from './engine.js'
 import type { ItemKind } from './core/types.js'
 
@@ -24,35 +26,18 @@ const KNOWN = new Set([
   'conflicts', 'secrets', 'doctor', 'config', 'completion', 'help',
 ])
 
-const KIND_OF: Record<string, ItemKind> = {
-  skill: 'skill', skills: 'skill',
-  mcp: 'mcp', mcps: 'mcp',
-  repo: 'repo', repos: 'repo',
-}
-
 /**
- * Parse `--only`. A name that is not a kind is an error, not a reason to fall
- * back to syncing everything: `--only skil` silently touching MCP servers and
- * repositories is the opposite of what was asked for.
+ * Report a failure the way the caller asked to be spoken to.
+ *
+ * Every exit from this module goes through here, including the ones that come
+ * out of a command as an exception: a script that asked for `--json` must get
+ * an envelope whatever happens, and "the process died with an empty stdout" is
+ * the one answer it cannot parse.
  */
-export function parseOnly(value: string | boolean | undefined): ItemKind[] | undefined {
-  if (value === undefined) return undefined
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error('--only needs a value: skills, mcp or repos (comma separated)')
-  }
-  const names = value.split(',').map((s) => s.trim()).filter((s) => s !== '')
-  const bad = names.filter((n) => KIND_OF[n] === undefined)
-  if (bad.length > 0) {
-    throw new Error(
-      `--only: unknown kind${bad.length > 1 ? 's' : ''} ${bad.map((b) => `"${b}"`).join(', ')} ` +
-      `— expected skills, mcp or repos`,
-    )
-  }
-  return [...new Set(names.map((n) => KIND_OF[n]!))]
-}
-
-function parseAgent(value: string | boolean | undefined): EngineOptions['mergeAgent'] {
-  return value === 'claude' || value === 'codex' || value === 'none' ? value : 'auto'
+function fail(command: string, message: string, io: Io): number {
+  if (io.json) emitJsonError(command, message, io)
+  else process.stderr.write(`syncskills: ${message}\n`)
+  return EXIT.ERROR
 }
 
 export async function dispatch(args: ParsedArgs, json: boolean): Promise<number> {
@@ -62,7 +47,20 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     verbose: args.flags.verbose === true,
     warnings: [],
   }
+  try {
+    return await run(args, io)
+  } catch (e) {
+    // An interrupt is not a failure, but it is not a success either: exiting 0
+    // would let `syncskills && deploy` run off the end of a cancelled sync.
+    if (e instanceof Cancelled) {
+      if (io.json) emitJsonError(args.command, (e as Error).message, io)
+      return EXIT.CANCELLED
+    }
+    return fail(args.command, (e as Error).message, io)
+  }
+}
 
+async function run(args: ParsedArgs, io: Io): Promise<number> {
   const profile = typeof args.flags.profile === 'string' ? args.flags.profile : undefined
   const baseDir = configDir({
     ...(typeof args.flags.config === 'string' ? { config: args.flags.config } : {}),
@@ -74,23 +72,11 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
   // Check the command name before anything else, so a typo reports itself
   // rather than being reported as a missing configuration.
   if (!KNOWN.has(args.command)) {
-    const msg = `unknown command "${args.command}" — run \`syncskills --help\``
-    if (io.json) emitJsonError(args.command, msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
-    return EXIT.ERROR
+    return fail(args.command, `unknown command "${args.command}" — run \`syncskills --help\``, io)
   }
 
-  // Argument errors are reported before anything about the machine's state: a
-  // misspelled kind is wrong whether or not this device has been set up.
-  let only: ItemKind[] | undefined
-  try {
-    only = parseOnly(args.flags.only)
-  } catch (e) {
-    const msg = (e as Error).message
-    if (io.json) emitJsonError(args.command, msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
-    return EXIT.ERROR
-  }
+  const only = parseOnly(args.flags.only)
+  const mergeAgent = parseAgent(args.flags['merge-agent'])
 
   if (args.command === 'completion') {
     return completionCommand(args.positionals[0], io)
@@ -99,15 +85,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     return configCommand(dir, args.positionals, io)
   }
 
-  let config
-  try {
-    config = await loadConfig(dir)
-  } catch (e) {
-    const msg = (e as Error).message
-    if (io.json) emitJsonError(args.command, msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
-    return EXIT.ERROR
-  }
+  const config = await loadConfig(dir)
 
   const token = await readToken(dir)
 
@@ -117,14 +95,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
 
   if (args.command === 'init') {
     const { runInit } = await import('./commands/init.js')
-    try {
-      await runInit({ configDir: dir, flags: args.flags, io })
-    } catch (e) {
-      const msg = (e as Error).message
-      if (io.json) emitJsonError('init', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
-      return EXIT.ERROR
-    }
+    await runInit({ configDir: dir, flags: args.flags, io })
     return EXIT.OK
   }
 
@@ -143,7 +114,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     config,
     paths,
     ...(only === undefined ? {} : { only }),
-    mergeAgent: parseAgent(args.flags['merge-agent']),
+    mergeAgent,
     useSecrets,
     dryRun: args.flags['dry-run'] === true,
     direction: 'both' as Direction,
@@ -181,11 +152,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
       return runTui(engine, io)
     }
 
-    default: {
-      const msg = `unknown command "${args.command}" — run \`syncskills --help\``
-      if (io.json) emitJsonError(args.command, msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
-      return EXIT.ERROR
-    }
+    default:
+      return fail(args.command, `unknown command "${args.command}" — run \`syncskills --help\``, io)
   }
 }

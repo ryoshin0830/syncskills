@@ -4,8 +4,10 @@ import type { Io } from '../output.js'
 
 const COMMANDS =
   'init sync status push pull diff conflicts secrets doctor config completion help'
+// Every flag any command takes. Completion is a menu, not a validator — which
+// command accepts which is decided in dispatch, where a wrong one is refused.
 const FLAGS =
-  '--json --yes --dry-run --only --merge-agent --no-secrets --profile --config --verbose --quiet --no-tui --help'
+  '--json --yes --dry-run --only --merge-agent --no-secrets --profile --config --version --verbose --quiet --no-tui --help'
 
 const ZSH = `#compdef syncskills
 _syncskills() {

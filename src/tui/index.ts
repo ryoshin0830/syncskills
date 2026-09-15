@@ -17,10 +17,17 @@ import { upsertEntry } from '../store/manifest.js'
 import { existingBaseTree, saveBaseTree } from '../basetree.js'
 import { summarize, renderDiff } from './diff.js'
 import { EXIT } from '../cli.js'
+import { answer } from '../prompt.js'
+import { PushRejected } from '../store/git.js'
+import { dropWrittenBases } from '../engine.js'
+import { stateKey } from '../state.js'
 import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
 import type { Action } from '../core/plan.js'
 import type { GitStore } from '../store/git.js'
+import type { ApplyResult } from '../core/apply.js'
+
+interface PublishOutcome { pushed: boolean; rejected?: string }
 
 async function readTree(dir: string): Promise<Map<string, string>> {
   const out = new Map<string, string>()
@@ -62,8 +69,10 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
     'What needs doing',
   )
 
-  const wantsDetail = await p.confirm({ message: 'Show the item list?', initialValue: false })
-  if (wantsDetail === true) {
+  const wantsDetail = answer(
+    await p.confirm({ message: 'Show the item list?', initialValue: false }),
+  )
+  if (wantsDetail) {
     p.note(
       [...plan.actions, ...plan.conflicts]
         .map((a) => `${a.type.padEnd(16)} ${a.kind}/${a.id}`)
@@ -76,15 +85,27 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
   const stillUnresolved: Action[] = []
   let resolvedAny = false
 
-  /** Put the state and manifest built so far where the other devices can see it. */
-  async function publish(applied: number): Promise<boolean> {
+  /**
+   * Put the state and manifest built so far where the other devices can see it.
+   * Returns the message to show when another device published first; see
+   * runSync() for why the state is deliberately left unsaved in that case.
+   */
+  async function publish(applied: number, result?: ApplyResult): Promise<PublishOutcome> {
     if (opts.useSecrets) await secrets.write(blob)
     await store.writeManifest(manifest)
-    const ok = await store.commitAndPush(
-      `sync from ${opts.config.device} (${applied} change(s))`,
-    )
-    await saveState(opts.configDir, state)
-    return ok
+    try {
+      const ok = await store.commitAndPush(
+        `sync from ${opts.config.device} (${applied} change(s))`,
+      )
+      await saveState(opts.configDir, state)
+      return { pushed: ok }
+    } catch (e) {
+      if (!(e instanceof PushRejected)) throw e
+      await dropWrittenBases(
+        opts.configDir, plan, result ?? { applied: [], failed: [], pending: [], backupDir: null },
+      )
+      return { pushed: false, rejected: e.message }
+    }
   }
 
   if (plan.conflicts.length > 0) {
@@ -108,7 +129,12 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       // The recorded base makes this a genuine three-way merge: without it a
       // deletion on one side cannot be told from an addition on the other, and
       // every overlapping file goes to the agent needlessly.
-      const baseDir = existingBaseTree(opts.configDir, 'skill', c.id)
+      // Only a base state.json vouches for: a tree left behind by a run that
+      // could not publish describes an agreement that never happened, and using
+      // it as the ancestor would read one side's file as deleted by the other.
+      const baseDir = state.items[stateKey('skill', c.id)] === undefined
+        ? undefined
+        : existingBaseTree(opts.configDir, 'skill', c.id)
       const report = await mergeTrees({
         ...(baseDir === undefined ? {} : { baseDir }),
         localDir, remoteDir, outDir, agent,
@@ -130,7 +156,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       }
 
       const choice = report.resolved
-        ? await p.select({
+        ? answer<string>(await p.select({
             message: `Accept the merge for ${c.id}?`,
             options: [
               { value: 'accept', label: 'Accept the merge (keeps both sides)' },
@@ -138,17 +164,17 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
               { value: 'remote', label: 'Take the other device’s version' },
               { value: 'skip', label: 'Decide later' },
             ],
-          })
-        : await p.select({
+          }))
+        : answer<string>(await p.select({
             message: `${c.id} could not be merged automatically. What now?`,
             options: [
               { value: 'local', label: 'Keep this device’s version' },
               { value: 'remote', label: 'Take the other device’s version' },
               { value: 'skip', label: 'Decide later' },
             ],
-          })
+          }))
 
-      if (choice === 'skip' || typeof choice !== 'string') {
+      if (choice === 'skip') {
         stillUnresolved.push(c)
         p.log.info(`${c.id} left alone. Both versions are saved in ${backup}`)
         continue
@@ -193,18 +219,23 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
   // ---- then the straightforward actions ----
   if (plan.actions.length > 0) {
-    const go = await p.confirm({
+    const go = answer(await p.confirm({
       message: `Apply ${plan.actions.length} change(s)?`,
       initialValue: true,
-    })
-    if (go !== true) {
+    }))
+    if (!go) {
       // The merges above already wrote to this machine. Declining the REST of
       // the plan must not throw that away: without publishing here the resolved
       // item has no base and no manifest entry, and the next run sees the same
       // conflict again.
       if (resolvedAny && !opts.dryRun) {
-        const pushed = await publish(0)
-        p.log.info(pushed ? 'Merge results published.' : 'Merge results recorded.')
+        const out = await publish(0)
+        if (out.rejected !== undefined) {
+          p.log.error(out.rejected)
+          p.outro(pc.red('Nothing was published.'))
+          return EXIT.ERROR
+        }
+        p.log.info(out.pushed ? 'Merge results published.' : 'Merge results recorded.')
       }
       p.outro('Nothing else applied.')
       return stillUnresolved.length > 0 ? EXIT.CONFLICT : EXIT.OK
@@ -231,17 +262,24 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
     p.log.warn(`${a.kind}/${a.id} needs you to finish it by hand`)
   }
 
+  let rejected: string | undefined
   if (!opts.dryRun) {
     // Publish the successes even when something failed; see runSync.
     const pspin = p.spinner()
     pspin.start('Publishing')
-    const pushed = await publish(result.applied.length)
-    pspin.stop(pushed ? 'Published' : 'Nothing to publish')
+    const out = await publish(result.applied.length, result)
+    rejected = out.rejected
+    pspin.stop(
+      out.rejected !== undefined ? 'Not published'
+      : out.pushed ? 'Published'
+      : 'Nothing to publish',
+    )
+    if (out.rejected !== undefined) p.log.error(out.rejected)
   }
 
   if (result.backupDir !== null) p.log.info(`Backup: ${result.backupDir}`)
 
-  if (result.failed.length > 0) {
+  if (result.failed.length > 0 || rejected !== undefined) {
     p.outro(pc.red('Finished with errors.'))
     return EXIT.ERROR
   }

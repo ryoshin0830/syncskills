@@ -311,6 +311,12 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
     case 'delete-local': {
       if (kind === 'skill') {
+        // The row goes first. If cc-switch is holding the database we must not
+        // remove the directory either, or the skill is left half-deleted: a row
+        // pointing at nothing, which localSkillSides() skips and nothing
+        // reports.
+        const outcome = await ctx.writer.deleteSkill(id)
+        if (outcome === 'pending') return 'pending'
         await rm(join(ctx.paths.skillsDir, id), { recursive: true, force: true })
       } else if (kind === 'mcp') {
         const outcome = await ctx.writer.deleteMcp(id)

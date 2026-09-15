@@ -11,6 +11,7 @@ export async function syncCommand(
   const outcome = await runSync(opts)
   const {
     plan, result, unresolved, pushed, secretsRepaired, secretsPending, blankCredentials,
+    pushRejected,
   } = outcome
 
   for (const b of blankCredentials) {
@@ -23,7 +24,7 @@ export async function syncCommand(
   // Worked out before anything is printed, so the JSON envelope's `ok` can say
   // the same thing as the exit code.
   const code =
-    result.failed.length > 0 ? EXIT.ERROR
+    result.failed.length > 0 || pushRejected !== undefined ? EXIT.ERROR
     : unresolved.length > 0 || result.pending.length > 0 || secretsPending.length > 0
       ? EXIT.CONFLICT
       : EXIT.OK
@@ -44,6 +45,7 @@ export async function syncCommand(
       secretsRepaired,
       secretsPending,
       blankCredentials,
+      pushRejected: pushRejected ?? null,
     }, io, code === EXIT.OK)
     return code
   }
@@ -51,7 +53,7 @@ export async function syncCommand(
   if (opts.dryRun) line(pc.bold('Dry run — nothing was changed.'), io)
 
   if (result.applied.length === 0 && unresolved.length === 0 && result.failed.length === 0
-      && result.pending.length === 0
+      && result.pending.length === 0 && pushRejected === undefined
       && secretsRepaired.length === 0 && secretsPending.length === 0) {
     line(pc.green('Everything is in sync.'), io)
   } else {
@@ -70,6 +72,10 @@ export async function syncCommand(
   // Merging is an interactive step: it rewrites a skill with an AI agent's
   // output, and that is not something to do behind a script's back. Say where
   // it lives rather than leaving exit 2 to be interpreted.
+  // Nothing left this machine. Say so plainly rather than leaving the applied
+  // lines above to read like a completed sync.
+  if (pushRejected !== undefined) line(pc.red(`  ✗ ${pushRejected}`), io)
+
   if (unresolved.length > 0) {
     line(
       pc.dim(`  run \`syncskills\` with no arguments to merge ${unresolved.length === 1 ? 'it' : 'them'} interactively`),

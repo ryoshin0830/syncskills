@@ -1,4 +1,8 @@
-export const EXIT = { OK: 0, ERROR: 1, CONFLICT: 2, UNINITIALIZED: 3 } as const
+export const EXIT = {
+  OK: 0, ERROR: 1, CONFLICT: 2, UNINITIALIZED: 3,
+  /** The user interrupted. 128 + SIGINT, the shell's own convention. */
+  CANCELLED: 130,
+} as const
 
 const SHORT: Record<string, string> = { y: 'yes', v: 'verbose', q: 'quiet', h: 'help' }
 const VALUE_FLAGS = new Set([
@@ -64,6 +68,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 import { readFileSync } from 'node:fs'
 import { helpFor, ROOT_HELP } from './help.js'
+import { flagsNotUsedBy, parseOnly, parseAgent } from './flags.js'
 import { emitJsonError } from './output.js'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { silenceSqliteExperimentalWarning } from './util/sqlite.js'
@@ -83,6 +88,38 @@ export function packageVersion(): string {
   }
 }
 
+/** What is wrong with these arguments, or undefined when nothing is. */
+function checkArguments(args: ParsedArgs): string | undefined {
+  const unknown = unknownFlags(args.flags)
+  if (unknown.length > 0) {
+    const names = unknown.map((f) => `"--${f}"`).join(', ')
+    return `unknown flag${unknown.length > 1 ? 's' : ''} ${names} — run \`syncskills --help\``
+  }
+
+  // --help and --version answer whatever else was typed, so they skip the rest.
+  if (args.flags.help === true || args.flags.version === true || args.command === 'help') {
+    return undefined
+  }
+
+  const unused = flagsNotUsedBy(args.command, args.flags)
+  if (unused.length > 0) {
+    const names = unused.map((f) => `"--${f}"`).join(', ')
+    const hint = unused.includes('merge-agent')
+      ? ' — conflicts are merged interactively; run `syncskills` with no arguments'
+      : ''
+    return `${names} ${unused.length > 1 ? 'are flags' : 'is a flag'} ` +
+      `\`${args.command}\` does not use${hint}`
+  }
+
+  try {
+    parseOnly(args.flags.only)
+    parseAgent(args.flags['merge-agent'])
+  } catch (e) {
+    return (e as Error).message
+  }
+  return undefined
+}
+
 export async function main(argv: string[]): Promise<number> {
   // node:sqlite prints an ExperimentalWarning the first time it is touched.
   // Silence that one class so ordinary runs stay clean; everything else still
@@ -91,14 +128,18 @@ export async function main(argv: string[]): Promise<number> {
 
   const args = parseArgs(argv)
 
-  const unknown = unknownFlags(args.flags)
-  if (unknown.length > 0) {
-    const names = unknown.map((f) => `"--${f}"`).join(', ')
-    const msg = `unknown flag${unknown.length > 1 ? 's' : ''} ${names} — run \`syncskills --help\``
+  // The whole command line is judged here, before the command runs and before
+  // the shape of the terminal decides anything: a flag that does not exist, one
+  // this command has no use for, and a value that is not a valid one all mean
+  // the user asked for something that will not happen, and must say so rather
+  // than printing help and exiting 0.
+  const badArguments = checkArguments(args)
+  if (badArguments !== undefined) {
     if (args.flags.json === true) {
-      emitJsonError(args.command, msg, { json: true, quiet: false, verbose: false, warnings: [] })
+      emitJsonError(args.command, badArguments,
+        { json: true, quiet: false, verbose: false, warnings: [] })
     } else {
-      process.stderr.write(`syncskills: ${msg}\n`)
+      process.stderr.write(`syncskills: ${badArguments}\n`)
     }
     return EXIT.ERROR
   }

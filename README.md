@@ -41,6 +41,8 @@ home Mac ──┘         (skills, MCP,          │
   Merging happens in the interactive interface only — run `npx syncskills` with no
   arguments — where the merged result is shown to you before it is written. `sync`,
   `push` and `pull` report a conflict, leave both sides intact, and exit 2.
+  Binary files are never merged line by line: if both machines changed one, it is
+  reported rather than resolved, and the executable bit travels with the content.
 - **No secrets in git, ever.** MCP `env` values live in a single 1Password secure note
   reached with a service-account token. The repository holds key names only. Every file
   staged for a push is scanned for credentials as a backstop.
@@ -142,21 +144,49 @@ esac
 
 ## Flags
 
+Accepted everywhere:
+
 ```
 --json                 machine-readable output
---yes, -y              assume yes; never prompt
---dry-run              show what would happen; change nothing
---only <kinds>         skills, mcp, repos
---merge-agent <name>   claude | codex | none   (default: auto; interactive only)
---no-secrets           do not touch 1Password
 --profile <name>       a second repository/config set
 --config <dir>         configuration directory
 --version              print the version
---verbose, --quiet, --no-tui, --help
+--verbose, --quiet, --help
 ```
 
-An unrecognised flag is refused rather than ignored, so a mistyped `--dry-run` cannot
-turn a preview into a real push.
+Belonging to particular commands:
+
+```
+--yes, -y              sync, push, pull, init — assume yes; never prompt
+--dry-run              sync, push, pull — show what would happen; change nothing
+--only <kinds>         sync, push, pull, status, diff — skills, mcp, repos
+--no-secrets           do not touch 1Password
+--merge-agent <name>   the interactive interface only — claude | codex | none | auto
+--host, --repo,        init only
+--vault, --device
+--no-tui               the interactive interface only
+```
+
+A flag is refused rather than ignored, both when it does not exist and when the command
+does not use it: a mistyped `--dry-run` cannot turn a preview into a real push, and
+`sync --merge-agent codex` says that sync does not merge instead of quietly doing
+nothing. Values are checked too — `--only skil` and `--merge-agent claud` are errors, not
+a silent fallback to everything.
+
+## Exit codes
+
+```
+0    success
+1    error — including "another device published first", where nothing was sent
+     and running again picks up from what that device left
+2    unresolved conflicts, or an action waiting for you
+3    not initialized
+130  cancelled with Ctrl-C; nothing was changed
+```
+
+With `--json`, every one of these comes with an envelope on stdout whose `ok` agrees
+with the exit code — including the failures, so a script never has to parse an empty
+stream.
 
 Without 1Password (`--no-secrets`, or `secrets: false`), MCP key names still sync but
 their values do not. The receiving machine gets the server with empty values and says so

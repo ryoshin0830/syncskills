@@ -7,6 +7,7 @@ import { run } from '../util/exec.js'
 import { saveConfig } from '../config.js'
 import { onePasswordProvider } from '../secrets/onepassword.js'
 import { emitJson } from '../output.js'
+import { answer, required } from '../prompt.js'
 import type { Config } from '../config.js'
 import type { Io } from '../output.js'
 
@@ -46,20 +47,6 @@ export async function ensureRepo(c: Config, ghBin = 'gh'): Promise<'created' | '
 
 function asString(v: unknown): string | undefined {
   return typeof v === 'string' && v !== '' ? v : undefined
-}
-
-/**
- * Ctrl-C at a @clack prompt resolves with a cancel symbol rather than
- * rejecting. Unchecked, that symbol is stringified and written into the
- * configuration as the device name.
- */
-class Cancelled extends Error {
-  constructor() { super('setup cancelled') }
-}
-
-function answer<T>(value: T | symbol): T {
-  if (p.isCancel(value)) throw new Cancelled()
-  return value as T
 }
 
 /** Split `owner/name`, refusing anything else rather than guessing a half. */
@@ -111,6 +98,7 @@ export async function runInit(opts: {
       : answer<string>(await p.text({
           message: 'Repository to store skills and MCP servers',
           initialValue: `${chosen.login}/syncskills`,
+          validate: required('a repository'),
         })))
   const { owner, repo } = parseRepoSlug(repoAnswer)
 
@@ -118,7 +106,11 @@ export async function runInit(opts: {
     asString(flags.device) ??
     (nonInteractive
       ? hostname()
-      : answer<string>(await p.text({ message: 'Name for this device', initialValue: hostname() })))
+      : answer<string>(await p.text({
+          message: 'Name for this device',
+          initialValue: hostname(),
+          validate: required('a device name'),
+        })))
 
   const useSecrets = flags['no-secrets'] !== true
   let vault = 'agent'
@@ -132,6 +124,7 @@ export async function runInit(opts: {
         : answer<string>(await p.text({
             message: '1Password vault holding the secret item',
             initialValue: 'agent',
+            validate: required('a vault name'),
           })))
 
     token =

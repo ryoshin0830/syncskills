@@ -42,6 +42,12 @@ export interface CcWriter {
   deleteMcp(id: string): Promise<DeleteOutcome>
   importSkill(dir: string, apps: App[]): Promise<void>
   setSkillApps(dir: string, apps: App[]): Promise<void>
+  /**
+   * Forget a skill entirely, row included. Deleting the directory alone leaves
+   * cc-switch listing a skill with no content, which localSkillSides() then
+   * skips forever — invisible to this tool and broken in cc-switch's own UI.
+   */
+  deleteSkill(dir: string): Promise<DeleteOutcome>
   syncSkills(): Promise<void>
   addRepo(owner: string, name: string, branch: string, enabled: boolean): Promise<void>
   removeRepo(owner: string, name: string): Promise<void>
@@ -200,6 +206,19 @@ export function createWriter(opts: {
 
     setSkillApps: putSkillApps,
 
+    // cc-switch's CLI has no command that removes a skill row, so this goes
+    // through the database under the same guard as the other direct writes.
+    async deleteSkill(dir) {
+      pendingReason = undefined
+      const ok = await deleteSkillRow(opts.paths, dir, isRunning).catch((e: Error) => {
+        pendingReason = e.message
+        return false
+      })
+      if (ok) return 'deleted'
+      pendingReason ??= `could not remove the cc-switch entry for "${dir}"`
+      return 'pending'
+    },
+
     async syncSkills() {
       await cc(['skills', 'sync'], 'skills sync')
     },
@@ -266,6 +285,35 @@ async function zeroAppMatrix(
     db.exec('BEGIN')
     db.prepare(`UPDATE ${table} SET ${sets} WHERE ${keyColumn} = ?`).run(key)
     db.exec('COMMIT')
+  } finally {
+    db.close()
+  }
+  return true
+}
+
+/**
+ * Remove a skill's row. Reports false when there was no row to remove, so the
+ * caller never records a delete that did not happen.
+ */
+async function deleteSkillRow(
+  p: CcPaths, dir: string, isRunning: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!existsSync(p.db)) return false
+  await guardCcSwitchStopped(isRunning, `removing "${dir}" from cc-switch`)
+
+  const DatabaseSync = loadDatabaseSync()
+  const db = new DatabaseSync(p.db)
+  try {
+    if (db.prepare('SELECT directory FROM skills WHERE directory = ?').get(dir) === undefined) {
+      return false
+    }
+    db.exec('BEGIN')
+    db.prepare('DELETE FROM skills WHERE directory = ?').run(dir)
+    db.exec('COMMIT')
+
+    const check = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown>
+    const verdict = String(Object.values(check)[0])
+    if (verdict !== 'ok') throw new Error(`database integrity check failed after delete: ${verdict}`)
   } finally {
     db.close()
   }

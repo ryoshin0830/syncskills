@@ -14,6 +14,30 @@ export function remoteUrl(c: Config): string {
 
 const DIR_OF: Record<ItemKind, string> = { skill: 'skills', mcp: 'mcp', repo: 'repos' }
 
+/**
+ * Another device pushed between our fetch and our push.
+ *
+ * For a tool whose whole point is several machines sharing one store this is an
+ * ordinary event, not a crash: it gets its own type so the caller can report it
+ * as a normal outcome rather than letting a raw git message escape.
+ */
+export class PushRejected extends Error {
+  constructor(public readonly detail: string) {
+    super(
+      'another device pushed to the store first, so nothing was sent. ' +
+      'Run syncskills again — this run changed only this machine, and the next ' +
+      'one will compare against what the other device published.',
+    )
+    this.name = 'PushRejected'
+  }
+}
+
+/** git's several ways of saying "your branch is behind". */
+function isRejection(stderr: string): boolean {
+  return /\[rejected\]|\[remote rejected\]|non-fast-forward|fetch first|cannot lock ref|Updates were rejected/i
+    .test(stderr)
+}
+
 export interface GitStore {
   /** The working copy on disk */
   dir: string
@@ -130,8 +154,18 @@ export function createGitStore(opts: {
       const st = await g(['status', '--porcelain'], 'status')
       if (st.stdout.trim().length === 0) return false
       await g(['commit', '-m', message], 'commit')
-      await g(['push', 'origin', branch], 'push')
-      return true
+
+      const pushed = await run(git, ['-C', dir, 'push', 'origin', branch])
+      if (pushed.code === 0) return true
+
+      const detail = pushed.stderr.trim() || pushed.stdout.trim()
+      // Replaying our commit on top of theirs is not an option: every sync
+      // rewrites manifest.json, so a rebase would conflict on nearly every
+      // race. Reporting it is correct instead — this run did not save its
+      // state, so the next one rebuilds the whole decision against the store
+      // as it now stands.
+      if (isRejection(detail)) throw new PushRejected(detail)
+      throw new Error(`git push failed: ${detail}`)
     },
   }
 }

@@ -13,7 +13,8 @@ describe('help', () => {
 
   it('documents the exit codes at the root', () => {
     expect(ROOT_HELP).toMatch(/EXIT CODES/)
-    for (const line of ['0  success', '1  error', '2  unresolved', '3  not initialized']) {
+    for (const line of ['0    success', '1    error', '2    unresolved',
+                        '3    not initialized', '130  cancelled']) {
       expect(ROOT_HELP).toContain(line)
     }
   })

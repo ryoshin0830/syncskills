@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { resolveAll } from './core/resolve.js'
 import { buildPlan } from './core/plan.js'
 import { applyPlan } from './core/apply.js'
-import { createGitStore } from './store/git.js'
+import { createGitStore, PushRejected } from './store/git.js'
+import { dropBaseTree } from './basetree.js'
 import { manifestSides } from './store/manifest.js'
 import { createWriter } from './ccswitch/write.js'
 import { localSkillSides, localMcpSides, localRepoSides, readMcp } from './ccswitch/read.js'
@@ -172,6 +173,12 @@ export interface SyncOutcome {
   secretsPending: { id: string; reason: string }[]
   /** Servers left holding an env key with no value; see blankCredentials(). */
   blankCredentials: { id: string; keys: string[] }[]
+  /**
+   * Set when another device published first and this run's changes stayed
+   * local. Not an exception: the local half of the work is real and has to be
+   * reported, and the run is repeatable as it stands.
+   */
+  pushRejected?: string
 }
 
 /**
@@ -224,6 +231,7 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
   }
 
   let pushed = false
+  let pushRejected: string | undefined
   if (!opts.dryRun) {
     // Publish what did land, even when something else failed. Every action
     // records its own base and its own manifest entry, so a partial plan is
@@ -238,10 +246,22 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
     // failure here simply leaves the remote unchanged.
     if (opts.useSecrets) await secrets.write(blob)
     await store.writeManifest(manifest)
-    pushed = await store.commitAndPush(
-      `sync from ${opts.config.device} (${result.applied.length} change(s))`,
-    )
-    await saveState(opts.configDir, state)
+    try {
+      pushed = await store.commitAndPush(
+        `sync from ${opts.config.device} (${result.applied.length} change(s))`,
+      )
+      await saveState(opts.configDir, state)
+    } catch (e) {
+      if (!(e instanceof PushRejected)) throw e
+      pushRejected = e.message
+      // state.json stays as it was, deliberately. Recording a base for an item
+      // whose content never reached the store would make the next run read
+      // "local matches base, remote has nothing" as a deletion and remove it.
+      // The base TREES were already written, though, so they have to come back
+      // out: a tree state.json does not describe would otherwise be used as the
+      // ancestor of a merge that never agreed on it.
+      await dropWrittenBases(opts.configDir, plan, result)
+    }
   }
 
   // Read after the repair pass, so a value 1Password just restored is not
@@ -251,5 +271,23 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
   return {
     plan, result, unresolved: plan.conflicts, pushed,
     secretsRepaired, secretsPending, blankCredentials: blanks,
+    ...(pushRejected === undefined ? {} : { pushRejected }),
+  }
+}
+
+/**
+ * Undo the base trees a run wrote when its state could not be saved. These two
+ * are one record — a hash in state.json and the content it names — so half of
+ * it is worse than none.
+ */
+export async function dropWrittenBases(
+  configDir: string, plan: Plan, result: ApplyResult,
+): Promise<void> {
+  const touched = [
+    ...result.applied.map((a) => ({ kind: a.kind, id: a.id })),
+    ...plan.inSync.map((r) => ({ kind: r.kind, id: r.id })),
+  ]
+  for (const { kind, id } of touched) {
+    if (kind === 'skill') await dropBaseTree(configDir, kind, id)
   }
 }
