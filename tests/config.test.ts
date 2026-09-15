@@ -8,8 +8,8 @@ let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'ss-cfg-')) })
 
 const sample: Config = {
-  schemaVersion: 1, host: 'github.com', owner: 'ryoshin0830', repo: 'syncskills',
-  branch: 'main', device: 'work-pc', vault: 'agent', item: 'syncskills',
+  schemaVersion: 1, host: 'github.com', owner: 'ryoshin0830', repo: 'oneset',
+  branch: 'main', device: 'work-pc', vault: 'agent', item: 'oneset',
   secrets: true, excludes: [],
 }
 
@@ -17,20 +17,20 @@ describe('configDir', () => {
   it('prefers the --config flag', () => {
     expect(configDir({ config: '/tmp/a' }, {} as NodeJS.ProcessEnv)).toBe('/tmp/a')
   })
-  it('then SYNCSKILLS_CONFIG_DIR', () => {
-    expect(configDir({}, { SYNCSKILLS_CONFIG_DIR: '/tmp/b' } as NodeJS.ProcessEnv)).toBe('/tmp/b')
+  it('then ONESET_CONFIG_DIR', () => {
+    expect(configDir({}, { ONESET_CONFIG_DIR: '/tmp/b' } as NodeJS.ProcessEnv)).toBe('/tmp/b')
   })
-  it('then XDG_CONFIG_HOME/syncskills', () => {
+  it('then XDG_CONFIG_HOME/oneset', () => {
     expect(configDir({}, { XDG_CONFIG_HOME: '/tmp/c' } as NodeJS.ProcessEnv))
-      .toBe('/tmp/c/syncskills')
+      .toBe('/tmp/c/oneset')
   })
-  it('otherwise ~/.config/syncskills', () => {
+  it('otherwise ~/.config/oneset', () => {
     expect(configDir({}, { HOME: '/Users/x' } as NodeJS.ProcessEnv))
-      .toBe('/Users/x/.config/syncskills')
+      .toBe('/Users/x/.config/oneset')
   })
   it('ignores an empty --config rather than resolving to the current directory', () => {
     expect(configDir({ config: '' }, { HOME: '/Users/x' } as NodeJS.ProcessEnv))
-      .toBe('/Users/x/.config/syncskills')
+      .toBe('/Users/x/.config/oneset')
   })
 })
 

@@ -10,7 +10,7 @@ import type { Config } from '../../src/config.js'
 
 const base: Config = {
   schemaVersion: 1, host: 'github.com', owner: 'o', repo: 'r', branch: 'main',
-  device: 'dev', vault: 'agent', item: 'syncskills', secrets: true, excludes: [],
+  device: 'dev', vault: 'agent', item: 'oneset', secrets: true, excludes: [],
 }
 
 describe('remoteUrl', () => {

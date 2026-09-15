@@ -16,7 +16,7 @@ beforeEach(async () => {
 async function writeConfig(over: Partial<Config> = {}): Promise<void> {
   const c: Config = {
     schemaVersion: 1, host: 'github.com', owner: 'o', repo: 'r', branch: 'main',
-    device: 'dev', vault: 'agent', item: 'syncskills', secrets: false, excludes: [],
+    device: 'dev', vault: 'agent', item: 'oneset', secrets: false, excludes: [],
     remote: join(tmpdir(), 'ss-no-such-remote-at-all.git'),
     ...over,
   }

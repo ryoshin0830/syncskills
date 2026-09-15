@@ -52,9 +52,9 @@ export async function diffCommand(
   opts: EngineOptions, id: string | undefined, io: Io,
 ): Promise<number> {
   if (id === undefined) {
-    const msg = 'usage: syncskills diff <item>'
+    const msg = 'usage: oneset diff <item>'
     if (io.json) emitJsonError('diff', msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
+    else process.stderr.write(`oneset: ${msg}\n`)
     return EXIT.ERROR
   }
 
@@ -63,16 +63,16 @@ export async function diffCommand(
   if ('ambiguous' in found) {
     const msg =
       `${id} names more than one item (${found.ambiguous.join(', ')}); ` +
-      `say which with \`syncskills diff ${found.ambiguous[0]}/${id}\``
+      `say which with \`oneset diff ${found.ambiguous[0]}/${id}\``
     if (io.json) emitJsonError('diff', msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
+    else process.stderr.write(`oneset: ${msg}\n`)
     return EXIT.ERROR
   }
   const r = found.item
   if (r === undefined) {
-    const msg = `no item named ${id}; run \`syncskills status\` to see what exists`
+    const msg = `no item named ${id}; run \`oneset status\` to see what exists`
     if (io.json) emitJsonError('diff', msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
+    else process.stderr.write(`oneset: ${msg}\n`)
     return EXIT.ERROR
   }
   // Every path below reads the item by its own id, not by what was typed.

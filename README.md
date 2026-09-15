@@ -1,17 +1,17 @@
-# syncskills
+# oneset
 
 Keep your AI agent skills and MCP servers identical across every machine you work on.
 
 ```bash
-npx syncskills init   # once per machine
-npx syncskills        # from then on
+npx oneset init   # once per machine
+npx oneset        # from then on
 ```
 
 `cc-switch` already unifies skills and MCP servers *within* one machine, across Claude Code,
 Codex, Gemini, OpenCode, Hermes and Pi. It does not keep machines in agreement with each
 other: uploads happen automatically, downloads only on demand, so devices drift apart.
 
-`syncskills` is the missing half. One command performs a real three-way sync through a
+`oneset` is the missing half. One command performs a real three-way sync through a
 GitHub repository you own, merges genuine conflicts instead of picking a loser, and keeps
 every credential out of git.
 
@@ -21,7 +21,7 @@ every credential out of git.
 
 ```
   work PC ─┐
-           ├─→  github.com/you/syncskills  ←─┐
+           ├─→  github.com/you/oneset  ←─┐
 home Mac ──┘         (skills, MCP,          │
                       app matrix)           │
   always-on MacBook ─────────────────────────┘
@@ -38,7 +38,7 @@ home Mac ──┘         (skills, MCP,          │
   edits for free and identically on every machine. Only genuine overlap reaches an AI agent
   (`claude -p` or `codex exec`), which is asked to preserve both contributions. Nothing it
   returns is written unless it validates, and both original versions are saved first.
-  Resolving happens in the interactive interface only — run `npx syncskills` with no
+  Resolving happens in the interactive interface only — run `npx oneset` with no
   arguments — where the merged result is shown to you before it is written. `sync`,
   `push` and `pull` report a conflict, leave both sides intact, and exit 2.
   An MCP server or a repository is a config object, not text, so there is no line-based
@@ -66,24 +66,24 @@ home Mac ──┘         (skills, MCP,          │
 | `claude` or `codex` | merges genuinely overlapping edits | optional |
 | `expect` | answers cc-switch's delete confirmation | optional |
 
-`syncskills doctor` checks all of them and tells you what to fix.
+`oneset doctor` checks all of them and tells you what to fix.
 
 ## Setup
 
 ```bash
-npx syncskills init
+npx oneset init
 ```
 
 It asks for a GitHub host and account (any GHES host works), a repository — created if it
 does not exist — a 1Password vault, a service-account token, and a name for this machine.
-The token is written to `~/.config/syncskills/op-token` with mode 0600 and never leaves
+The token is written to `~/.config/oneset/op-token` with mode 0600 and never leaves
 the machine.
 
 Non-interactively:
 
 ```bash
-SYNCSKILLS_OP_TOKEN=ops_... npx syncskills init \
-  --host github.com --repo you/syncskills --vault agent --device work-pc --json
+ONESET_OP_TOKEN=ops_... npx oneset init \
+  --host github.com --repo you/oneset --vault agent --device work-pc --json
 ```
 
 Repeat on each machine, pointing at the same repository, and give each one its own
@@ -92,10 +92,10 @@ Repeat on each machine, pointing at the same repository, and give each one its o
 ## Everyday use
 
 ```bash
-npx syncskills              # interactive: review, resolve, apply
-npx syncskills status       # what differs; changes nothing
-npx syncskills sync --yes   # apply without prompting
-npx syncskills diff code-review
+npx oneset              # interactive: review, resolve, apply
+npx oneset status       # what differs; changes nothing
+npx oneset sync --yes   # apply without prompting
+npx oneset diff code-review
 ```
 
 ## How it decides
@@ -123,8 +123,8 @@ machine that enables a skill for Hermes does not fight a machine that edited its
 Every command takes `--json` and returns a stable envelope:
 
 ```bash
-npx syncskills status --json | jq '.data.items[] | select(.decision != "IN_SYNC")'
-npx syncskills sync --yes --json
+npx oneset status --json | jq '.data.items[] | select(.decision != "IN_SYNC")'
+npx oneset sync --yes --json
 ```
 
 ```
@@ -138,7 +138,7 @@ Exit codes
 So a wrapper can be exactly this:
 
 ```bash
-npx syncskills sync --yes --json > result.json
+npx oneset sync --yes --json > result.json
 case $? in
   0) echo "in sync" ;;
   2) echo "needs a human"; jq '.data.unresolved' result.json ;;
@@ -203,18 +203,18 @@ in `status` and after each `sync`; fill them in there, or turn 1Password back on
 Both original versions are saved before anything is written:
 
 ```bash
-npx syncskills conflicts                       # list snapshots
-npx syncskills conflicts restore <id>          # put one back
+npx oneset conflicts                       # list snapshots
+npx oneset conflicts restore <id>          # put one back
 ```
 
 Every apply also snapshots the cc-switch database and your whole skills tree to
-`~/.config/syncskills/backups/<timestamp>/` first. A `--dry-run` writes nothing at all,
+`~/.config/oneset/backups/<timestamp>/` first. A `--dry-run` writes nothing at all,
 backups included.
 
 ## Where things live
 
 ```
-~/.config/syncskills/
+~/.config/oneset/
 ├── config.json     host, repository, vault, device name
 ├── state.json      what this machine and the remote last agreed on
 ├── op-token        1Password service-account token (0600)
@@ -223,7 +223,7 @@ backups included.
 └── cache/repo/     the git working copy
 
 ~/.cc-switch/
-├── cc-switch.db    read-only to syncskills
+├── cc-switch.db    read-only to oneset
 └── skills/         the skill content being synced
 ```
 
@@ -232,7 +232,7 @@ backups included.
 Two things cannot travel between machines through cc-switch's supported write
 paths. Rather than dropping them silently, `status` reports each one:
 
-- **A skill directory cc-switch has no row for.** syncskills syncs what cc-switch
+- **A skill directory cc-switch has no row for.** oneset syncs what cc-switch
   manages. Adopt a stray directory with
   `cc-switch skills import-from-apps <dir>` and it syncs from then on.
 - **Tags on an MCP server.** cc-switch's import carries a server's config and its

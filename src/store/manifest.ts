@@ -37,7 +37,7 @@ export function parseManifest(text: string): Manifest {
   }
   const m = parsed as Manifest
   if (m.schemaVersion !== 1) {
-    throw new Error(`unsupported manifest schema version ${m.schemaVersion}; upgrade syncskills`)
+    throw new Error(`unsupported manifest schema version ${m.schemaVersion}; upgrade oneset`)
   }
   if (m.entries === null || typeof m.entries !== 'object' || Array.isArray(m.entries)) {
     throw new Error('manifest.json has no entries object')

@@ -31,9 +31,9 @@ export function configDir(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   if (flags.config !== undefined && flags.config !== '') return flags.config
-  if (env.SYNCSKILLS_CONFIG_DIR) return env.SYNCSKILLS_CONFIG_DIR
-  if (env.XDG_CONFIG_HOME) return join(env.XDG_CONFIG_HOME, 'syncskills')
-  return join(env.HOME ?? homedir(), '.config', 'syncskills')
+  if (env.ONESET_CONFIG_DIR) return env.ONESET_CONFIG_DIR
+  if (env.XDG_CONFIG_HOME) return join(env.XDG_CONFIG_HOME, 'oneset')
+  return join(env.HOME ?? homedir(), '.config', 'oneset')
 }
 
 export async function loadConfig(dir: string): Promise<Config | null> {
@@ -50,7 +50,7 @@ export async function loadConfig(dir: string): Promise<Config | null> {
   if (parsed.schemaVersion !== 1) {
     throw new Error(
       `unsupported config schema version ${parsed.schemaVersion} in ${join(dir, 'config.json')}; ` +
-      `upgrade syncskills`,
+      `upgrade oneset`,
     )
   }
   return parsed

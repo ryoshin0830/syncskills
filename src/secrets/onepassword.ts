@@ -64,7 +64,7 @@ export function onePasswordProvider(opts: {
       } catch (e) {
         throw new Error(
           `the 1Password item "${opts.item}" in vault "${opts.vault}" does not contain valid ` +
-          `JSON: ${(e as Error).message}. syncskills will not overwrite it; fix or rename it.`,
+          `JSON: ${(e as Error).message}. oneset will not overwrite it; fix or rename it.`,
         )
       }
       if (parsed.schemaVersion !== 1) {
@@ -91,7 +91,7 @@ export function onePasswordProvider(opts: {
         ],
       })
 
-      const dir = await mkdtemp(join(tmpdir(), 'syncskills-op-'))
+      const dir = await mkdtemp(join(tmpdir(), 'oneset-op-'))
       const file = join(dir, 'item.json')
       try {
         await writeFile(file, template, { mode: 0o600 })

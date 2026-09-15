@@ -23,7 +23,7 @@ describe('built CLI', () => {
   it('prints root help and exits 0', async () => {
     const r = await run('node', ['dist/cli.js', '--help'])
     expect(r.code).toBe(0)
-    expect(r.stdout).toContain('syncskills')
+    expect(r.stdout).toContain('oneset')
     expect(r.stdout).toContain('EXIT CODES')
     expect(r.stdout.length).toBeGreaterThan(400)
   })
@@ -41,7 +41,7 @@ describe('built CLI', () => {
   it('exits 3 with a JSON envelope when not initialized', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ss-smoke-'))
     const r = await run('node', ['dist/cli.js', 'status', '--json'], {
-      env: { SYNCSKILLS_CONFIG_DIR: join(dir, 'nothing-here') },
+      env: { ONESET_CONFIG_DIR: join(dir, 'nothing-here') },
     })
     expect(r.code).toBe(3)
     const env = JSON.parse(r.stdout) as { ok: boolean; error: string; schemaVersion: number }
@@ -59,7 +59,7 @@ describe('built CLI', () => {
   it('prints its version', async () => {
     const r = await run('node', ['dist/cli.js', '--version'])
     expect(r.code).toBe(0)
-    expect(r.stdout.trim()).toMatch(/^syncskills \d+\.\d+\.\d+/)
+    expect(r.stdout.trim()).toMatch(/^oneset \d+\.\d+\.\d+/)
   })
 
   /**
@@ -85,7 +85,7 @@ describe('built CLI', () => {
   it('exits 1 on an unknown --only kind rather than syncing everything', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ss-only-'))
     const r = await run('node', ['dist/cli.js', 'sync', '--only', 'skil'], {
-      env: { SYNCSKILLS_CONFIG_DIR: join(dir, 'nothing-here') },
+      env: { ONESET_CONFIG_DIR: join(dir, 'nothing-here') },
     })
     expect(r.code).toBe(1)
   })
@@ -94,14 +94,14 @@ describe('built CLI', () => {
     for (const shell of ['zsh', 'bash', 'fish']) {
       const r = await run('node', ['dist/cli.js', 'completion', shell])
       expect(r.code, shell).toBe(0)
-      expect(r.stdout, shell).toContain('syncskills')
+      expect(r.stdout, shell).toContain('oneset')
     }
   }, 30_000)
 
   it('runs doctor and reports machine-readable checks', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ss-smoke2-'))
     const r = await run('node', ['dist/cli.js', 'doctor', '--json'], {
-      env: { SYNCSKILLS_CONFIG_DIR: join(dir, 'nothing-here') },
+      env: { ONESET_CONFIG_DIR: join(dir, 'nothing-here') },
     })
     const env = JSON.parse(r.stdout) as { data: { checks: { name: string }[] } }
     const names = env.data.checks.map((c) => c.name)
@@ -113,7 +113,7 @@ describe('built CLI', () => {
   it('never prints a SQLite experimental warning to a user', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ss-smoke3-'))
     const r = await run('node', ['dist/cli.js', 'doctor'], {
-      env: { SYNCSKILLS_CONFIG_DIR: join(dir, 'nothing-here') },
+      env: { ONESET_CONFIG_DIR: join(dir, 'nothing-here') },
     })
     expect(r.stderr).not.toMatch(/ExperimentalWarning/)
   }, 30_000)
@@ -140,7 +140,7 @@ describe('built CLI', () => {
  * `process.argv[1]` is the file itself. npm installs a bin as a SYMLINK into
  * node_modules/.bin, so argv[1] is the link while `import.meta.url` is the file
  * it points at. The entrypoint guard compared the two without resolving either,
- * so `npx syncskills` ran nothing at all and exited 0 — the one thing the
+ * so `npx oneset` ran nothing at all and exited 0 — the one thing the
  * README tells people to type. Only installing it catches that.
  *
  * It shares the build above deliberately: tsup cleans dist/, so a second build
@@ -166,19 +166,18 @@ describe('the package as a user installs it', () => {
     )
     expect(installed.code, installed.stderr).toBe(0)
 
-    bin = join(consumer, 'node_modules', '.bin', 'syncskills')
+    bin = join(consumer, 'node_modules', '.bin', 'oneset')
   }, 180_000)
 
-  it('links both bin names', async () => {
+  it('links the command', async () => {
     const names = await readdir(join(bin, '..'))
-    expect(names).toContain('syncskills')
-    expect(names).toContain('ssync')
+    expect(names).toContain('oneset')
   })
 
   it('prints its version through the bin link', async () => {
     const r = await run(bin, ['--version'])
     expect(r.code).toBe(0)
-    expect(r.stdout.trim()).toMatch(/^syncskills \d+\.\d+\.\d+/)
+    expect(r.stdout.trim()).toMatch(/^oneset \d+\.\d+\.\d+/)
   })
 
   it('prints help through the bin link', async () => {
@@ -196,7 +195,7 @@ describe('the package as a user installs it', () => {
 
   it('reports "not initialized" with exit 3, not silence', async () => {
     const r = await run(bin, ['status'], {
-      env: { SYNCSKILLS_CONFIG_DIR: await mkdtemp(join(tmpdir(), 'ss-empty-')) },
+      env: { ONESET_CONFIG_DIR: await mkdtemp(join(tmpdir(), 'ss-empty-')) },
     })
     expect(r.code).toBe(3)
   })

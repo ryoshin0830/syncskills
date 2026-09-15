@@ -52,7 +52,7 @@ async function snapshotConflict(
 }
 
 export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
-  p.intro(pc.bold(`syncskills — ${opts.config.device}`))
+  p.intro(pc.bold(`oneset — ${opts.config.device}`))
 
   const spin = p.spinner()
   spin.start('Comparing this device with the remote')

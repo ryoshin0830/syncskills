@@ -93,7 +93,7 @@ function checkArguments(args: ParsedArgs): string | undefined {
   const unknown = unknownFlags(args.flags)
   if (unknown.length > 0) {
     const names = unknown.map((f) => `"--${f}"`).join(', ')
-    return `unknown flag${unknown.length > 1 ? 's' : ''} ${names} — run \`syncskills --help\``
+    return `unknown flag${unknown.length > 1 ? 's' : ''} ${names} — run \`oneset --help\``
   }
 
   // --help and --version answer whatever else was typed, so they skip the rest.
@@ -105,7 +105,7 @@ function checkArguments(args: ParsedArgs): string | undefined {
   if (unused.length > 0) {
     const names = unused.map((f) => `"--${f}"`).join(', ')
     const hint = unused.includes('merge-agent')
-      ? ' — conflicts are merged interactively; run `syncskills` with no arguments'
+      ? ' — conflicts are merged interactively; run `oneset` with no arguments'
       : ''
     return `${names} ${unused.length > 1 ? 'are flags' : 'is a flag'} ` +
       `\`${args.command}\` does not use${hint}`
@@ -139,7 +139,7 @@ export async function main(argv: string[]): Promise<number> {
       emitJsonError(args.command, badArguments,
         { json: true, quiet: false, verbose: false, warnings: [] })
     } else {
-      process.stderr.write(`syncskills: ${badArguments}\n`)
+      process.stderr.write(`oneset: ${badArguments}\n`)
     }
     return EXIT.ERROR
   }
@@ -151,7 +151,7 @@ export async function main(argv: string[]): Promise<number> {
 
   if (args.flags.version === true) {
     if (args.flags.json === true) emitJson('version', { version: packageVersion() }, io)
-    else process.stdout.write(`syncskills ${packageVersion()}\n`)
+    else process.stdout.write(`oneset ${packageVersion()}\n`)
     return EXIT.OK
   }
 
@@ -183,7 +183,7 @@ export async function main(argv: string[]): Promise<number> {
  * as a hostname and the comparison silently never matches.
  *
  * And npm installs a bin as a SYMLINK into node_modules/.bin, so when a user
- * runs `npx syncskills` — the one thing the README tells them to type — argv[1]
+ * runs `npx oneset` — the one thing the README tells them to type — argv[1]
  * is the link while import.meta.url is the file it points at. Both sides are
  * resolved to their real path before being compared.
  */
@@ -206,7 +206,7 @@ if (invokedDirectly) {
   main(process.argv.slice(2))
     .then((code) => { process.exitCode = code })
     .catch((e: Error) => {
-      process.stderr.write(`syncskills: ${e.message}\n`)
+      process.stderr.write(`oneset: ${e.message}\n`)
       process.exitCode = EXIT.ERROR
     })
 }

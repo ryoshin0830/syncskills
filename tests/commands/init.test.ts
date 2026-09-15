@@ -46,7 +46,7 @@ describe('detectGhHosts', () => {
 
 const config: Config = {
   schemaVersion: 1, host: 'github.com', owner: 'o', repo: 'r', branch: 'main',
-  device: 'd', vault: 'agent', item: 'syncskills', secrets: true, excludes: [],
+  device: 'd', vault: 'agent', item: 'oneset', secrets: true, excludes: [],
 }
 
 describe('ensureRepo', () => {
@@ -81,11 +81,11 @@ esac
 
 describe('parseRepoSlug', () => {
   it('splits owner from name', () => {
-    expect(parseRepoSlug('me/syncskills')).toEqual({ owner: 'me', repo: 'syncskills' })
+    expect(parseRepoSlug('me/oneset')).toEqual({ owner: 'me', repo: 'oneset' })
   })
 
   it('tolerates surrounding whitespace', () => {
-    expect(parseRepoSlug('  me/syncskills  ')).toEqual({ owner: 'me', repo: 'syncskills' })
+    expect(parseRepoSlug('  me/oneset  ')).toEqual({ owner: 'me', repo: 'oneset' })
   })
 
   /**
@@ -93,7 +93,7 @@ describe('parseRepoSlug', () => {
    * default repository name and pointing the device at the wrong place.
    */
   it('refuses anything that is not owner/name', () => {
-    for (const bad of ['syncskills', 'a/b/c', '/name', 'owner/', '', '   ']) {
+    for (const bad of ['oneset', 'a/b/c', '/name', 'owner/', '', '   ']) {
       expect(() => parseRepoSlug(bad), bad).toThrow(/owner\/name/)
     }
   })

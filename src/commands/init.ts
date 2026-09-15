@@ -37,7 +37,7 @@ export async function ensureRepo(c: Config, ghBin = 'gh'): Promise<'created' | '
 
   const create = await run(ghBin, [
     'repo', 'create', slug, '--private',
-    '--description', 'syncskills store — AI agent skills and MCP servers',
+    '--description', 'oneset store — AI agent skills and MCP servers',
   ], { env: { GH_HOST: c.host } })
   if (create.code !== 0) {
     throw new Error(`could not create ${slug} on ${c.host}: ${create.stderr.trim()}`)
@@ -66,7 +66,7 @@ export async function runInit(opts: {
   const { flags, io } = opts
   const nonInteractive = io.json || flags.yes === true
 
-  if (!io.json) p.intro(pc.bold('syncskills — set up this device'))
+  if (!io.json) p.intro(pc.bold('oneset — set up this device'))
 
   const hosts = await detectGhHosts()
   if (hosts.length === 0) {
@@ -94,10 +94,10 @@ export async function runInit(opts: {
   const repoAnswer =
     asString(flags.repo) ??
     (nonInteractive
-      ? `${chosen.login}/syncskills`
+      ? `${chosen.login}/oneset`
       : answer<string>(await p.text({
           message: 'Repository to store skills and MCP servers',
-          initialValue: `${chosen.login}/syncskills`,
+          initialValue: `${chosen.login}/oneset`,
           validate: required('a repository'),
         })))
   const { owner, repo } = parseRepoSlug(repoAnswer)
@@ -128,7 +128,7 @@ export async function runInit(opts: {
           })))
 
     token =
-      asString(process.env.SYNCSKILLS_OP_TOKEN) ??
+      asString(process.env.ONESET_OP_TOKEN) ??
       (nonInteractive
         ? ''
         : answer<string>(await p.password({
@@ -137,14 +137,14 @@ export async function runInit(opts: {
 
     if (token === '') {
       const msg =
-        'a 1Password service-account token is required; pass it in SYNCSKILLS_OP_TOKEN ' +
+        'a 1Password service-account token is required; pass it in ONESET_OP_TOKEN ' +
         'for a non-interactive setup, or run without --json to be prompted, ' +
         'or use --no-secrets'
       if (!io.json) p.cancel(msg)
       throw new Error(msg)
     }
 
-    const check = await onePasswordProvider({ vault, item: 'syncskills', token }).check()
+    const check = await onePasswordProvider({ vault, item: 'oneset', token }).check()
     if (!check.ok) {
       if (!io.json) p.cancel(`1Password check failed: ${check.detail}`)
       throw new Error(`1Password check failed: ${check.detail}`)
@@ -160,7 +160,7 @@ export async function runInit(opts: {
     branch: 'main',
     device,
     vault,
-    item: 'syncskills',
+    item: 'oneset',
     secrets: useSecrets,
     excludes: [],
   }
@@ -177,7 +177,7 @@ export async function runInit(opts: {
   if (io.json) {
     emitJson('init', { config, repository: state, configDir: opts.configDir }, io)
   } else {
-    p.outro(`Ready. Run ${pc.bold('syncskills')} to sync.`)
+    p.outro(`Ready. Run ${pc.bold('oneset')} to sync.`)
   }
   return config
 }

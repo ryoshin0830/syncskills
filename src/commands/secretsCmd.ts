@@ -43,6 +43,6 @@ export async function secretsCommand(
 
   const msg = `unknown subcommand ${action}; expected list or check`
   if (io.json) emitJsonError('secrets', msg, io)
-  else process.stderr.write(`syncskills: ${msg}\n`)
+  else process.stderr.write(`oneset: ${msg}\n`)
   return EXIT.ERROR
 }

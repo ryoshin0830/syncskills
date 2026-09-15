@@ -1,15 +1,14 @@
 {
-  "name": "syncskills",
+  "name": "oneset",
   "version": "0.1.0",
-  "description": "Perfect multi-device sync for AI agent skills and MCP servers, built on cc-switch, GitHub and 1Password.",
+  "description": "One set of AI agent skills and MCP servers, identical on every machine. Built on cc-switch, GitHub and 1Password.",
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
   },
   "bin": {
-    "syncskills": "./dist/cli.js",
-    "ssync": "./dist/cli.js"
+    "oneset": "./dist/cli.js"
   },
   "files": [
     "dist",

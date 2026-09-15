@@ -25,7 +25,7 @@ describe('help', () => {
       expect(h.length, `${c} help is too short`).toBeGreaterThan(120)
       expect(h, `${c} help lacks USAGE`).toMatch(/USAGE/)
       expect(h, `${c} help lacks EXAMPLES`).toMatch(/EXAMPLES/)
-      expect(h, `${c} help does not name itself`).toContain(`syncskills ${c}`)
+      expect(h, `${c} help does not name itself`).toContain(`oneset ${c}`)
     }
   })
 
@@ -33,12 +33,12 @@ describe('help', () => {
     for (const c of COMMANDS) expect(helpFor(c), `${c} lacks --json`).toContain('--json')
   })
 
-  it('every example in a page invokes syncskills', () => {
+  it('every example in a page invokes oneset', () => {
     for (const c of COMMANDS) {
       const examples = helpFor(c).split('EXAMPLES')[1] ?? ''
       const lines = examples.split('\n').map((l) => l.trim()).filter((l) => l.length > 0)
       expect(lines.length, `${c} has no examples`).toBeGreaterThan(0)
-      expect(lines.some((l) => l.includes('syncskills')), `${c} examples omit the binary`).toBe(true)
+      expect(lines.some((l) => l.includes('oneset')), `${c} examples omit the binary`).toBe(true)
     }
   })
 

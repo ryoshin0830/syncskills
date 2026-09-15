@@ -1,8 +1,8 @@
-# syncskills — Design Spec
+# oneset — Design Spec
 
 **Date:** 2026-09-14
 **Status:** Approved
-**npm:** `syncskills` · **repo:** `github.com/ryoshin0830/syncskills`
+**npm:** `oneset` · **repo:** `github.com/ryoshin0830/syncskills`
 
 ---
 
@@ -15,7 +15,7 @@ but it does not keep machines in agreement with each other. Its built-in sync
 uploads automatically and downloads only on demand, so devices drift apart and
 the feature goes unused.
 
-`syncskills` is the missing half: one command, `npx syncskills`, that makes every
+`oneset` is the missing half: one command, `npx oneset`, that makes every
 device converge on the same set of skills and MCP servers, with real difference
 tracking and no silent data loss.
 
@@ -29,7 +29,7 @@ tracking and no silent data loss.
 
 ### Non-goals
 
-- Replacing `cc-switch`. It is a hard prerequisite; `syncskills` drives it.
+- Replacing `cc-switch`. It is a hard prerequisite; `oneset` drives it.
 - A `cc-switch`-free mode. Deferred to a later project.
 - Syncing providers or API credentials for the harnesses themselves.
 
@@ -62,7 +62,7 @@ Both are user-configurable and must be read, never assumed.
 ### 2.2 `skills.updated_at` is unusable
 
 Every row carries `updated_at = 0`. cc-switch offers no trustworthy per-item
-timestamp. **This single fact forces `syncskills` to maintain its own version
+timestamp. **This single fact forces `oneset` to maintain its own version
 state**, and rules out any design that compares cc-switch timestamps.
 
 `content_hash` (sha256) and `installed_at` do exist and are meaningful.
@@ -128,7 +128,7 @@ reading a prompt from stdin. Either can perform a non-interactive merge.
              ├── mcp/<id>.json     MCP config, env values replaced by key names
              └── repos.json        skill_repos
                        ▲ ▼  git over the local `gh` credential helper
-             ~/.config/syncskills/
+             ~/.config/oneset/
              ├── config.json       host, repo, vault, device name, excludes
              ├── state.json    ★   BASE hashes — the three-way merge base
              ├── op-token          1Password service-account token, mode 0600
@@ -140,7 +140,7 @@ reading a prompt from stdin. Either can perform a non-interactive merge.
              └─ write  deeplink · set-apps · import-from-apps · skills sync
                        ▲ ▼
              1Password  vault: <configurable>
-             └─ SECURE_NOTE "syncskills" → notesPlain = { "mcp": { … env … } }
+             └─ SECURE_NOTE "oneset" → notesPlain = { "mcp": { … env … } }
 ```
 
 ### Module boundaries
@@ -204,10 +204,10 @@ The repository never receives a secret value.
 ```
 repo   mcp/oracle.json     { "env": { "API_KEY": { "secret": true } } }
 1P     notesPlain          { "mcp": { "oracle": { "env": { "API_KEY": "sk-…" } } } }
-local  ~/.config/syncskills/op-token   service-account token, mode 0600
+local  ~/.config/oneset/op-token   service-account token, mode 0600
 ```
 
-- `syncskills init` prompts for the service-account token and the vault name,
+- `oneset init` prompts for the service-account token and the vault name,
   verifies them with `op whoami` and `op vault list`, and writes the token with
   mode 0600.
 - On **push**, each MCP `env` value is stripped to its key name in the repo and
@@ -282,7 +282,7 @@ A conflict never discards a side. Resolution proceeds per file inside the item:
      if SKILL.md: frontmatter parses as YAML and retains `name` + `description`
      if JSON: parses
    Any failure → discard the agent result and fall back to manual choice.
-6. Snapshot both original sides to ~/.config/syncskills/conflicts/<ts>/<item>/
+6. Snapshot both original sides to ~/.config/oneset/conflicts/<ts>/<item>/
    before writing anything.
 7. Present the diff for approval. `--yes` accepts automatically.
 ```
@@ -298,7 +298,7 @@ Order is fixed so that a partial failure leaves a consistent state:
 
 ```
 1. Snapshot: copy cc-switch.db and every affected skill directory into
-   ~/.config/syncskills/backups/<ts>/
+   ~/.config/oneset/backups/<ts>/
 2. Pull operations   — write skill directories, then register via cc-switch
 3. MCP operations    — deeplink for create; delete-then-import for update
 4. Matrix operations — skills set-apps / mcp set-apps
@@ -331,21 +331,21 @@ database is always taken first.
 
 ## 7. CLI surface
 
-`syncskills` with no arguments launches the TUI. Any argument selects
+`oneset` with no arguments launches the TUI. Any argument selects
 non-interactive mode. Both drive the same engine.
 
 ```
-syncskills                      TUI
-syncskills init                 setup wizard
-syncskills sync                 bidirectional sync
-syncskills status               show differences, no side effects
-syncskills push | pull          one direction only
-syncskills diff <item>          diff a single item
-syncskills conflicts            list and restore snapshots
-syncskills secrets <push|pull|list>
-syncskills doctor               environment diagnosis
-syncskills config <get|set|path>
-syncskills completion <zsh|bash|fish>
+oneset                      TUI
+oneset init                 setup wizard
+oneset sync                 bidirectional sync
+oneset status               show differences, no side effects
+oneset push | pull          one direction only
+oneset diff <item>          diff a single item
+oneset conflicts            list and restore snapshots
+oneset secrets <push|pull|list>
+oneset doctor               environment diagnosis
+oneset config <get|set|path>
+oneset completion <zsh|bash|fish>
 ```
 
 Global flags:
@@ -370,8 +370,8 @@ Exit codes:
 3  not initialized
 ```
 
-An agent reads `syncskills status --json`, applies with
-`syncskills sync --yes --json`, and detects unresolved conflicts by exit
+An agent reads `oneset status --json`, applies with
+`oneset sync --yes --json`, and detects unresolved conflicts by exit
 code 2. `--help` on every subcommand carries a description, every flag, and
 worked examples.
 
@@ -457,4 +457,4 @@ Development is test-first.
 | 6 | Merge: `git merge-file`, merge agents, validation, snapshots |
 | 7 | TUI |
 | 8 | Two-device integration suite |
-| 9 | README, `npx syncskills` verification, publish to npm |
+| 9 | README, `npx oneset` verification, publish to npm |

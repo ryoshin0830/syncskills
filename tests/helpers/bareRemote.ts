@@ -15,7 +15,7 @@ export async function makeBareRemote(): Promise<string> {
   await run('git', ['init', '-b', 'main', seed])
   await run('git', ['-C', seed, 'config', 'user.email', 't@example.com'])
   await run('git', ['-C', seed, 'config', 'user.name', 'test'])
-  await writeFile(join(seed, 'README.md'), '# syncskills store\n')
+  await writeFile(join(seed, 'README.md'), '# oneset store\n')
   await run('git', ['-C', seed, 'add', '-A'])
   await run('git', ['-C', seed, 'commit', '-m', 'seed'])
   await run('git', ['-C', seed, 'push', dir, 'main'])

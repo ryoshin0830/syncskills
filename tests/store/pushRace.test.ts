@@ -8,7 +8,7 @@ import type { Config } from '../../src/config.js'
 
 const base: Config = {
   schemaVersion: 1, host: 'github.com', owner: 'o', repo: 'r', branch: 'main',
-  device: 'dev', vault: 'agent', item: 'syncskills', secrets: false, excludes: [],
+  device: 'dev', vault: 'agent', item: 'oneset', secrets: false, excludes: [],
 }
 
 describe('a push another device got in first', () => {
