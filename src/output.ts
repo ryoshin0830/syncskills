@@ -1,5 +1,3 @@
-import pc from 'picocolors'
-
 export interface Envelope {
   schemaVersion: 1
   ok: boolean

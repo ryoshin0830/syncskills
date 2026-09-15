@@ -162,6 +162,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       const writer = createWriter({
         paths: opts.paths,
         ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+        ...(opts.isCcSwitchRunning === undefined ? {} : { isCcSwitchRunning: opts.isCcSwitchRunning }),
       })
       await writer.importSkill(c.id, c.resolution.apps)
 
@@ -192,6 +193,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
   const writer = createWriter({
     paths: opts.paths,
     ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+    ...(opts.isCcSwitchRunning === undefined ? {} : { isCcSwitchRunning: opts.isCcSwitchRunning }),
   })
   const aspin = p.spinner()
   aspin.start('Applying')

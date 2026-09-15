@@ -45,19 +45,40 @@ export interface CcWriter {
   syncSkills(): Promise<void>
   addRepo(owner: string, name: string, branch: string, enabled: boolean): Promise<void>
   removeRepo(owner: string, name: string): Promise<void>
+  /** Write an MCP server's credentials without going through a deep link. */
+  repairMcpSecrets(id: string, env: Record<string, string>): Promise<DeleteOutcome>
+  /** Why the last operation could not be completed, when it returned 'pending'. */
+  lastPendingReason(): string | undefined
 }
 
 export function createWriter(opts: {
   bin?: string
   paths: CcPaths
   env?: Record<string, string>
+  /**
+   * How to tell whether cc-switch is live. Defaults to looking for the real
+   * process; tests supply their own so the guard itself stays testable without
+   * depending on what happens to be running on the machine.
+   */
+  isCcSwitchRunning?: () => Promise<boolean>
 }): CcWriter {
   const bin = opts.bin ?? 'cc-switch'
   const env = { CC_SWITCH_TEST_DISABLE_OPEN: '1', ...opts.env }
+  const isRunning = opts.isCcSwitchRunning ?? ccSwitchIsRunning
+
+  let pendingReason: string | undefined
 
   async function removeMcp(id: string): Promise<DeleteOutcome> {
+    pendingReason = undefined
     if (await ptyDelete(bin, id, env).catch(() => false)) return 'deleted'
-    if (await directDelete(bin, id, opts.paths, env).catch(() => false)) return 'deleted'
+    // Keep the reason rather than swallowing it: "cc-switch is running" is
+    // something the user can act on, and 'pending' alone is not.
+    const ok = await directDelete(bin, id, opts.paths, env, isRunning).catch((e: Error) => {
+      pendingReason = e.message
+      return false
+    })
+    if (ok) return 'deleted'
+    pendingReason ??= `could not delete "${id}"; is expect(1) installed?`
     return 'pending'
   }
 
@@ -103,11 +124,39 @@ export function createWriter(opts: {
       const hasSecrets = Object.values(env).some((v) => v !== '')
       if (!hasSecrets) return 'deleted'
 
-      const ok = await writeMcpConfig(opts.paths, id, config).catch(() => false)
-      return ok ? 'deleted' : 'pending'
+      const ok = await writeMcpConfig(opts.paths, id, config, isRunning).catch((e: Error) => {
+        pendingReason = e.message
+        return false
+      })
+      if (ok) return 'deleted'
+      pendingReason ??= `could not store the credentials for "${id}"`
+      return 'pending'
     },
 
+    async repairMcpSecrets(id, envValues) {
+      pendingReason = undefined
+      const ok = await writeMcpEnvOnly(opts.paths, id, envValues, isRunning).catch((e: Error) => {
+        pendingReason = e.message
+        return false
+      })
+      if (ok) return 'deleted'
+      pendingReason ??= `could not store the credentials for "${id}"`
+      return 'pending'
+    },
+
+    lastPendingReason: () => pendingReason,
+
     async setMcpApps(id, apps) {
+      // cc-switch refuses an empty list ("Please provide at least one app"),
+      // so disabling the last harness has to go through the database.
+      if (apps.length === 0) {
+        const ok = await zeroAppMatrix(opts.paths, 'mcp_servers', 'id', id, isRunning).catch((e: Error) => {
+          pendingReason = e.message
+          return false
+        })
+        if (!ok) throw new Error(pendingReason ?? `could not disable "${id}" everywhere`)
+        return
+      }
       await cc(['mcp', 'set-apps', id, '--apps', apps.join(',')], 'mcp set-apps')
     },
 
@@ -116,6 +165,14 @@ export function createWriter(opts: {
     },
 
     async setSkillApps(dir, apps) {
+      if (apps.length === 0) {
+        const ok = await zeroAppMatrix(opts.paths, 'skills', 'directory', dir, isRunning).catch((e: Error) => {
+          pendingReason = e.message
+          return false
+        })
+        if (!ok) throw new Error(pendingReason ?? `could not disable "${dir}" everywhere`)
+        return
+      }
       await cc(['skills', 'set-apps', dir, '--apps', apps.join(',')], 'skills set-apps')
     },
 
@@ -146,6 +203,77 @@ export function createWriter(opts: {
   }
 }
 
+const APP_COLUMNS = [
+  'enabled_claude', 'enabled_codex', 'enabled_gemini',
+  'enabled_opencode', 'enabled_hermes', 'enabled_grokbuild',
+]
+
+export async function ccSwitchIsRunning(): Promise<boolean> {
+  const ps = await run('pgrep', ['-f', 'cc-switch|ccswitch'])
+  return ps.code === 0 && ps.stdout.trim().length > 0
+}
+
+async function guardCcSwitchStopped(
+  isRunning: () => Promise<boolean>, what: string,
+): Promise<void> {
+  if (await isRunning()) {
+    throw new Error(
+      `cc-switch is running, so ${what} was not applied. ` +
+      `Quit cc-switch and sync again, or make the change in cc-switch yourself.`,
+    )
+  }
+}
+
+/** Disable an item for every harness — a state cc-switch's CLI cannot express. */
+async function zeroAppMatrix(
+  p: CcPaths, table: 'skills' | 'mcp_servers', keyColumn: string, key: string,
+  isRunning: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!existsSync(p.db)) return false
+  await guardCcSwitchStopped(isRunning, `disabling "${key}" everywhere`)
+
+  const DatabaseSync = loadDatabaseSync()
+  const db = new DatabaseSync(p.db)
+  try {
+    const sets = APP_COLUMNS.map((c) => `${c} = 0`).join(', ')
+    db.exec('BEGIN')
+    db.prepare(`UPDATE ${table} SET ${sets} WHERE ${keyColumn} = ?`).run(key)
+    db.exec('COMMIT')
+  } finally {
+    db.close()
+  }
+  return true
+}
+
+/** Merge real environment values into a server that already has the right shape. */
+async function writeMcpEnvOnly(
+  p: CcPaths, id: string, envValues: Record<string, string>,
+  isRunning: () => Promise<boolean>,
+): Promise<boolean> {
+  if (!existsSync(p.db)) return false
+  await guardCcSwitchStopped(isRunning, `the credentials for "${id}"`)
+
+  const DatabaseSync = loadDatabaseSync()
+  const db = new DatabaseSync(p.db)
+  try {
+    const row = db.prepare('SELECT server_config FROM mcp_servers WHERE id = ?').get(id) as
+      { server_config?: string } | undefined
+    if (row?.server_config === undefined) return false
+
+    const config = JSON.parse(row.server_config) as Record<string, unknown>
+    const current = (config.env ?? {}) as Record<string, string>
+    config.env = { ...current, ...envValues }
+
+    db.exec('BEGIN')
+    db.prepare('UPDATE mcp_servers SET server_config = ? WHERE id = ?')
+      .run(JSON.stringify(config), id)
+    db.exec('COMMIT')
+  } finally {
+    db.close()
+  }
+  return true
+}
+
 function mcpExists(p: CcPaths, id: string): boolean {
   if (!existsSync(p.db)) return false
   const DatabaseSync = loadDatabaseSync()
@@ -168,16 +296,10 @@ function mcpExists(p: CcPaths, id: string): boolean {
  */
 async function writeMcpConfig(
   p: CcPaths, id: string, config: Record<string, unknown>,
+  isRunning: () => Promise<boolean>,
 ): Promise<boolean> {
   if (!existsSync(p.db)) return false
-
-  const ps = await run('pgrep', ['-f', 'cc-switch|ccswitch'])
-  if (ps.code === 0 && ps.stdout.trim().length > 0) {
-    throw new Error(
-      `cc-switch is running, so "${id}" was not updated. ` +
-      `Quit cc-switch and sync again, or change it yourself in cc-switch.`,
-    )
-  }
+  await guardCcSwitchStopped(isRunning, `the change to "${id}"`)
 
   const DatabaseSync = loadDatabaseSync()
   const db = new DatabaseSync(p.db)
@@ -225,16 +347,10 @@ expect {
  */
 async function directDelete(
   _bin: string, id: string, p: CcPaths, _env: Record<string, string>,
+  isRunning: () => Promise<boolean>,
 ): Promise<boolean> {
   if (!existsSync(p.db)) return false
-
-  const ps = await run('pgrep', ['-f', 'cc-switch|ccswitch'])
-  if (ps.code === 0 && ps.stdout.trim().length > 0) {
-    throw new Error(
-      'cc-switch is running; refusing to write to its database directly. ' +
-      'Quit cc-switch and run syncskills again, or delete the server in cc-switch yourself.',
-    )
-  }
+  await guardCcSwitchStopped(isRunning, `deleting "${id}"`)
 
   const DatabaseSync = loadDatabaseSync()
   const db = new DatabaseSync(p.db)

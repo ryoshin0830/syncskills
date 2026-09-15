@@ -136,3 +136,62 @@ describe('importMcpWithSecrets', () => {
     expect(outcome).toBe('deleted')
   })
 })
+
+describe('credential repair and the empty matrix', () => {
+  let stub: Stub
+  let f: FakeHome
+  const stopped = async () => false
+  const running = async () => true
+
+  beforeEach(async () => {
+    stub = await makeStubBin('cc-switch')
+    f = await makeFakeCcSwitch()
+  })
+
+  it('writes a missing credential into an existing server', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x', env: { API_KEY: '' } }, ['claude'])
+
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    expect(await w.repairMcpSecrets('o', { API_KEY: 'sk-restored' })).toBe('deleted')
+
+    const { readMcp } = await import('../../src/ccswitch/read.js')
+    expect((readMcp(f)[0]!.config.env as Record<string, string>).API_KEY).toBe('sk-restored')
+  })
+
+  it('never puts the restored credential on a command line', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x', env: { API_KEY: '' } }, ['claude'])
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await w.repairMcpSecrets('o', { API_KEY: 'sk-restored' })
+    expect((await stub.calls()).join('\n')).not.toContain('sk-restored')
+  })
+
+  it('refuses while cc-switch is live, and says why', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x', env: { API_KEY: '' } }, ['claude'])
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: running })
+    expect(await w.repairMcpSecrets('o', { API_KEY: 'sk' })).toBe('pending')
+    expect(w.lastPendingReason()).toMatch(/cc-switch is running/)
+  })
+
+  it('disables an item everywhere, which cc-switch refuses to express', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x' }, ['claude', 'codex'])
+
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: stopped })
+    await w.setMcpApps('o', [])
+
+    const { readMcp } = await import('../../src/ccswitch/read.js')
+    expect(readMcp(f)[0]!.apps).toEqual([])
+    // It must not have tried `set-apps --apps ''`, which the real binary rejects.
+    expect((await stub.calls()).join('\n')).not.toContain('--apps ')
+  })
+
+  it('reports why an empty matrix could not be applied', async () => {
+    const { addMcp } = await import('../helpers/fakeCcSwitch.js')
+    addMcp(f, 'o', { type: 'stdio', command: 'x' }, ['claude'])
+    const w = createWriter({ bin: stub.bin, paths: f, isCcSwitchRunning: running })
+    await expect(w.setMcpApps('o', [])).rejects.toThrow(/cc-switch is running/)
+  })
+})

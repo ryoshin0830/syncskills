@@ -102,6 +102,8 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
     direction: 'both',
     remoteOverride: remote,
     ccBin,
+    // The simulated machine is never running the real cc-switch app.
+    isCcSwitchRunning: async () => false,
     ...over,
   })
 

@@ -1,6 +1,7 @@
 import pc from 'picocolors'
 import { gather } from '../engine.js'
 import { unmanagedSkills, taggedMcpServers } from '../ccswitch/read.js'
+import { unsafeManifestIds } from '../store/manifest.js'
 import { buildPlan } from '../core/plan.js'
 import { narrowByDirection } from '../engine.js'
 import { emitJson, line } from '../output.js'
@@ -9,8 +10,21 @@ import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
 
 export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
-  const { resolutions, unsafeLocalIds } = await gather(opts)
+  const { resolutions, unsafeLocalIds, staleSecrets, manifest } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  for (const s of staleSecrets) {
+    io.warnings.push(
+      `mcp/${s.id} is missing ${Object.keys(s.env).sort().join(', ')} on this machine; ` +
+      `the next sync restores them from 1Password`,
+    )
+  }
+
+  // Ids the remote advertises that this machine refuses. Saying so is the
+  // difference between "not synced" and "silently invisible".
+  for (const id of unsafeManifestIds(manifest)) {
+    io.warnings.push(`${id} was published by another device but its name is not safe to use as a path here`)
+  }
 
   for (const id of unsafeLocalIds) {
     io.warnings.push(
@@ -51,6 +65,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
       unmanagedSkills: unmanaged,
       untransferableTags: tagged,
       unsafeIds: unsafeLocalIds,
+      staleSecrets: staleSecrets.map((s) => ({ id: s.id, keys: Object.keys(s.env).sort() })),
     }, io)
     return 0
   }

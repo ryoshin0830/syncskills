@@ -6,7 +6,7 @@ import { applyPlan } from './core/apply.js'
 import { createGitStore } from './store/git.js'
 import { manifestSides } from './store/manifest.js'
 import { createWriter } from './ccswitch/write.js'
-import { localSkillSides, localMcpSides, localRepoSides } from './ccswitch/read.js'
+import { localSkillSides, localMcpSides, localRepoSides, readMcp } from './ccswitch/read.js'
 import { loadState, saveState } from './state.js'
 import { nullProvider, emptyBlob } from './secrets/provider.js'
 import { onePasswordProvider } from './secrets/onepassword.js'
@@ -54,6 +54,8 @@ export interface EngineOptions {
   remoteOverride?: string
   /** Use a different cc-switch binary. Tests only. */
   ccBin?: string
+  /** Override how the cc-switch process is detected. Tests only. */
+  isCcSwitchRunning?: () => Promise<boolean>
 }
 
 const ALL_KINDS: ItemKind[] = ['skill', 'mcp', 'repo']
@@ -67,6 +69,14 @@ export interface Gathered {
   resolutions: Resolution[]
   /** Local ids refused as unsafe to use as a path. Reported, never synced. */
   unsafeLocalIds: string[]
+  /**
+   * Servers whose credentials 1Password holds but this machine does not.
+   * Env values are excluded from the content hash — deliberately, so rotating a
+   * key is not a config change — which means a credential that failed to write
+   * leaves a server that looks identical to the remote and would never be
+   * retried. This is detected separately, from the values themselves.
+   */
+  staleSecrets: { id: string; env: Record<string, string> }[]
   store: GitStore
   manifest: Manifest
   state: StateFile
@@ -124,7 +134,21 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
     }
   }
 
-  return { resolutions, store, manifest, state, blob, secrets, unsafeLocalIds }
+  const staleSecrets: { id: string; env: Record<string, string> }[] = []
+  if (kinds.includes('mcp')) {
+    for (const row of readMcp(opts.paths)) {
+      const stored = blob.mcp[row.id]?.env
+      if (stored === undefined) continue
+      const live = (row.config.env ?? {}) as Record<string, unknown>
+      const missing: Record<string, string> = {}
+      for (const [k, v] of Object.entries(stored)) {
+        if (v !== '' && String(live[k] ?? '') === '') missing[k] = v
+      }
+      if (Object.keys(missing).length > 0) staleSecrets.push({ id: row.id, env: missing })
+    }
+  }
+
+  return { resolutions, store, manifest, state, blob, secrets, unsafeLocalIds, staleSecrets }
 }
 
 export interface SyncOutcome {
@@ -132,20 +156,41 @@ export interface SyncOutcome {
   result: ApplyResult
   unresolved: Action[]
   pushed: boolean
+  /** Credentials this run restored, and ones it could not. */
+  secretsRepaired: string[]
+  secretsPending: { id: string; reason: string }[]
 }
 
 export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
-  const { resolutions, store, manifest, state, blob, secrets } = await gather(opts)
+  const { resolutions, store, manifest, state, blob, secrets, staleSecrets } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
 
   const writer = createWriter({
     paths: opts.paths,
     ...(opts.ccBin === undefined ? {} : { bin: opts.ccBin }),
+    ...(opts.isCcSwitchRunning === undefined ? {} : { isCcSwitchRunning: opts.isCcSwitchRunning }),
   })
   const result = await applyPlan(plan, {
     paths: opts.paths, writer, store, manifest, state, secrets, blob,
     device: opts.config.device, configDir: opts.configDir, dryRun: opts.dryRun,
   })
+
+  // Restore any credential 1Password holds that this machine is missing. A
+  // blank one is invisible to the content hash, so nothing else would retry it.
+  const secretsRepaired: string[] = []
+  const secretsPending: { id: string; reason: string }[] = []
+  if (!opts.dryRun && opts.useSecrets) {
+    for (const stale of staleSecrets) {
+      const outcome = await writer.repairMcpSecrets(stale.id, stale.env)
+      if (outcome === 'deleted') secretsRepaired.push(stale.id)
+      else {
+        secretsPending.push({
+          id: stale.id,
+          reason: writer.lastPendingReason() ?? 'unknown reason',
+        })
+      }
+    }
+  }
 
   let pushed = false
   if (!opts.dryRun && result.failed.length === 0) {
@@ -163,5 +208,5 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
     await saveState(opts.configDir, state)
   }
 
-  return { plan, result, unresolved: plan.conflicts, pushed }
+  return { plan, result, unresolved: plan.conflicts, pushed, secretsRepaired, secretsPending }
 }
