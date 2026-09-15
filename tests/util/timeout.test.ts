@@ -13,6 +13,23 @@ describe('run with a timeout', () => {
     expect(Date.now() - started).toBeLessThan(10_000)
   })
 
+  /**
+   * 'close' fires when the child's stdio closes, not when the child exits — and
+   * a child that left something of its own behind holding those pipes never
+   * closes them. Killing the child then produced 'exit' and no 'close', so the
+   * promise never settled and the caller waited for ever. `sh -c 'sleep 30'`
+   * happens to exec-replace the shell on macOS and so never showed this; on
+   * Linux it is what CI saw.
+   */
+  it('gives up even when the child left something holding its pipes', async () => {
+    const started = Date.now()
+    const r = await run('sh', ['-c', 'sleep 30 & wait'], { timeoutMs: 300 })
+
+    expect(r.code).not.toBe(0)
+    expect(r.stderr).toMatch(/without exiting/)
+    expect(Date.now() - started).toBeLessThan(10_000)
+  }, 15_000)
+
   it('leaves a child that finishes in time alone', async () => {
     const r = await run('sh', ['-c', 'echo done'], { timeoutMs: 10_000 })
     expect(r.code).toBe(0)

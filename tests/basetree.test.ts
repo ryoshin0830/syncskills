@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { mkdtemp, mkdir, writeFile, chmod } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { saveBaseTree, existingBaseTree, dropBaseTree } from '../src/basetree.js'
@@ -83,20 +83,17 @@ describe('a save that fails partway through', () => {
     await saveBaseTree(configDir, 'skill', 'demo', src, 'sha256:v1')
     expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v1')).toBeDefined()
 
-    // A source that cannot be read all the way through.
-    const broken = await mkdtemp(join(tmpdir(), 'ss-bt-broken-'))
-    await writeFile(join(broken, 'SKILL.md'), 'v1\n')
-    await mkdir(join(broken, 'locked'))
-    await writeFile(join(broken, 'locked', 'inner.md'), 'x\n')
-    await chmod(join(broken, 'locked'), 0o000)
+    // A source the copy cannot walk: it exists, so the save gets past its own
+    // guard, and then fails partway. A regular file where a directory is
+    // expected fails the same way for every user on every platform — a
+    // permission trick would not, since CI may well be running as root.
+    const notADirectory = join(await mkdtemp(join(tmpdir(), 'ss-bt-file-')), 'oops')
+    await writeFile(notADirectory, 'not a directory\n')
 
-    try {
-      // The SAME hash: this is the re-save case, where a surviving hash file
-      // would agree with whatever the interrupted copy left behind.
-      await expect(saveBaseTree(configDir, 'skill', 'demo', broken, 'sha256:v1')).rejects.toThrow()
-      expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v1')).toBeUndefined()
-    } finally {
-      await chmod(join(broken, 'locked'), 0o700)
-    }
+    // The SAME hash: this is the re-save case, where a surviving hash file
+    // would agree with whatever the interrupted copy left behind.
+    await expect(saveBaseTree(configDir, 'skill', 'demo', notADirectory, 'sha256:v1'))
+      .rejects.toThrow()
+    expect(existingBaseTree(configDir, 'skill', 'demo', 'sha256:v1')).toBeUndefined()
   })
 })

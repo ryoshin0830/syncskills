@@ -39,11 +39,14 @@ export function run(bin: string, args: string[], opts: RunOptions = {}): Promise
       killer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs + 2000)
       killer.unref()
     }
-    child.stdout.on('data', (d: Buffer) => { outChunks.push(d) })
-    child.stderr.on('data', (d: Buffer) => { errChunks.push(d) })
-    child.on('error', (e) => { clearTimeout(killer); reject(e) })
-    child.on('close', (code, signal) => {
+    let abandon: NodeJS.Timeout | undefined
+    let settled = false
+
+    function finish(code: number | null, signal: NodeJS.Signals | null): void {
+      if (settled) return
+      settled = true
       clearTimeout(killer)
+      clearTimeout(abandon)
       const stdout = Buffer.concat(outChunks).toString('utf8')
       let stderr = Buffer.concat(errChunks).toString('utf8')
       if (signal !== null && stderr === '') {
@@ -52,6 +55,29 @@ export function run(bin: string, args: string[], opts: RunOptions = {}): Promise
       // A signalled child reports a null code; 1 keeps "did it work?" answerable
       // with the same check everywhere.
       resolve({ code: code ?? 1, stdout, stderr })
+    }
+
+    child.stdout.on('data', (d: Buffer) => { outChunks.push(d) })
+    child.stderr.on('data', (d: Buffer) => { errChunks.push(d) })
+    child.on('error', (e) => { clearTimeout(killer); clearTimeout(abandon); reject(e) })
+    child.on('close', (code, signal) => { finish(code, signal) })
+
+    /**
+     * 'close' waits for the child's STDIO to close, which is not the same as the
+     * child exiting: anything the child started of its own inherits those pipes
+     * and can hold them open after the child is gone. Killing such a child gives
+     * 'exit' and never 'close', and the promise never settles — the interactive
+     * spinner turns for ever, which is precisely what the timeout exists to
+     * prevent. `sh -c 'sleep 30'` happens to exec-replace the shell on macOS and
+     * so never showed this; on Linux it did.
+     *
+     * Only a SIGNALLED exit takes this path. An ordinary one waits for 'close'
+     * as before, so output still draining is never truncated.
+     */
+    child.on('exit', (code, signal) => {
+      if (signal === null || settled) return
+      abandon = setTimeout(() => { finish(code, signal) }, 500)
+      abandon.unref()
     })
     // A child that exits before it has read its stdin makes the write fail with
     // EPIPE. Without a listener that is an unhandled 'error' event, which takes
