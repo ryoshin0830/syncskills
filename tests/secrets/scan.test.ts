@@ -50,7 +50,7 @@ describe('scanForSecrets', () => {
   })
 
   it('does not flag a 1Password reference', () => {
-    expect(scanForSecrets('"API_KEY": "op://agent/syncskills/notesPlain"')).toEqual([])
+    expect(scanForSecrets('"API_KEY": "op://agent/oneset/notesPlain"')).toEqual([])
   })
 
   it('reports each distinct pattern once, not once per occurrence', () => {

@@ -36,7 +36,7 @@ const KNOWN = new Set([
  */
 function fail(command: string, message: string, io: Io): number {
   if (io.json) emitJsonError(command, message, io)
-  else process.stderr.write(`syncskills: ${message}\n`)
+  else process.stderr.write(`oneset: ${message}\n`)
   return EXIT.ERROR
 }
 
@@ -51,7 +51,7 @@ export async function dispatch(args: ParsedArgs, json: boolean): Promise<number>
     return await run(args, io)
   } catch (e) {
     // An interrupt is not a failure, but it is not a success either: exiting 0
-    // would let `syncskills && deploy` run off the end of a cancelled sync.
+    // would let `oneset && deploy` run off the end of a cancelled sync.
     if (e instanceof Cancelled) {
       if (io.json) emitJsonError(args.command, (e as Error).message, io)
       return EXIT.CANCELLED
@@ -72,7 +72,7 @@ async function run(args: ParsedArgs, io: Io): Promise<number> {
   // Check the command name before anything else, so a typo reports itself
   // rather than being reported as a missing configuration.
   if (!KNOWN.has(args.command)) {
-    return fail(args.command, `unknown command "${args.command}" — run \`syncskills --help\``, io)
+    return fail(args.command, `unknown command "${args.command}" — run \`oneset --help\``, io)
   }
 
   const only = parseOnly(args.flags.only)
@@ -100,9 +100,9 @@ async function run(args: ParsedArgs, io: Io): Promise<number> {
   }
 
   if (config === null && !WITHOUT_CONFIG.has(args.command)) {
-    const msg = 'not initialized — run `syncskills init`'
+    const msg = 'not initialized — run `oneset init`'
     if (io.json) emitJsonError(args.command, msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
+    else process.stderr.write(`oneset: ${msg}\n`)
     return EXIT.UNINITIALIZED
   }
   if (config === null) return EXIT.UNINITIALIZED
@@ -153,6 +153,6 @@ async function run(args: ParsedArgs, io: Io): Promise<number> {
     }
 
     default:
-      return fail(args.command, `unknown command "${args.command}" — run \`syncskills --help\``, io)
+      return fail(args.command, `unknown command "${args.command}" — run \`oneset --help\``, io)
   }
 }

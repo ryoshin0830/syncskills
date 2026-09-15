@@ -38,8 +38,8 @@ export interface RepoRow {
 function open(p: CcPaths): DatabaseSync {
   if (!existsSync(p.db)) {
     throw new Error(
-      `cc-switch database not found at ${p.db}. syncskills drives cc-switch and cannot ` +
-      `run without it; install cc-switch and run it once, or point syncskills elsewhere ` +
+      `cc-switch database not found at ${p.db}. oneset drives cc-switch and cannot ` +
+      `run without it; install cc-switch and run it once, or point oneset elsewhere ` +
       `with CC_SWITCH_CONFIG_DIR.`,
     )
   }
@@ -170,14 +170,14 @@ export function localMcpSides(p: CcPaths): Map<string, Side> {
   return out
 }
 
-/** Servers carrying tags, which syncskills cannot transfer between machines. */
+/** Servers carrying tags, which oneset cannot transfer between machines. */
 export function taggedMcpServers(p: CcPaths): string[] {
   return readMcp(p).filter((r) => r.tags.length > 0).map((r) => r.id).sort()
 }
 
 /**
  * Directories sitting in the skills folder that cc-switch has no row for.
- * syncskills syncs what cc-switch manages, so these are skipped — but silently
+ * oneset syncs what cc-switch manages, so these are skipped — but silently
  * skipping a directory the user can see is how trust is lost, so they are
  * reported instead. `cc-switch skills import-from-apps <dir>` adopts one.
  */

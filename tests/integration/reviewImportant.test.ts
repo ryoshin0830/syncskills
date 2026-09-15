@@ -132,7 +132,7 @@ describe('the JSON envelope agrees with the exit code', () => {
     await conflict()
     const { code, text } = await b.runSyncCommand({ json: false })
     expect(code).toBe(2)
-    expect(text).toMatch(/syncskills` with no arguments/)
+    expect(text).toMatch(/oneset` with no arguments/)
   })
 
   it('marks a dry run so it cannot be mistaken for a real one', async () => {

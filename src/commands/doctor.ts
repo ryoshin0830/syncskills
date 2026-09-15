@@ -96,7 +96,7 @@ export async function collectChecks(opts: {
 
   if (opts.config === null) {
     checks.push({
-      name: 'configuration', ok: false, required: true, detail: 'not initialized — run `syncskills init`',
+      name: 'configuration', ok: false, required: true, detail: 'not initialized — run `oneset init`',
     })
     return checks
   }
@@ -124,7 +124,7 @@ export async function collectChecks(opts: {
         name: '1Password',
         ok: false,
         required: false,
-        detail: 'no service-account token stored — run `syncskills init` or pass --no-secrets',
+        detail: 'no service-account token stored — run `oneset init` or pass --no-secrets',
       })
     } else {
       const c = await onePasswordProvider({

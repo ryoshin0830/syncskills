@@ -26,9 +26,9 @@ export function loadDatabaseSync(): DatabaseSyncCtor {
     return cached
   } catch (err) {
     throw new Error(
-      `this Node build has no node:sqlite, which syncskills needs to read cc-switch's ` +
+      `this Node build has no node:sqlite, which oneset needs to read cc-switch's ` +
       `database. Node 22.13 or newer is required (you are on ${process.version}). ` +
-      `Upgrade Node, or run syncskills through npx with a newer runtime. ` +
+      `Upgrade Node, or run oneset through npx with a newer runtime. ` +
       `Original error: ${(err as Error).message}`,
     )
   }

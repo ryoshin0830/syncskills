@@ -25,7 +25,7 @@ export class PushRejected extends Error {
   constructor(public readonly detail: string) {
     super(
       'another device pushed to the store first, so nothing was sent. ' +
-      'Run syncskills again — this run changed only this machine, and the next ' +
+      'Run oneset again — this run changed only this machine, and the next ' +
       'one will compare against what the other device published.',
     )
     this.name = 'PushRejected'
@@ -114,8 +114,8 @@ export function createGitStore(opts: {
         await g(['clean', '-fd'], 'clean')
       }
 
-      await run(git, ['-C', dir, 'config', 'user.email', 'syncskills@localhost'])
-      await run(git, ['-C', dir, 'config', 'user.name', 'syncskills'])
+      await run(git, ['-C', dir, 'config', 'user.email', 'oneset@localhost'])
+      await run(git, ['-C', dir, 'config', 'user.name', 'oneset'])
     },
 
     async readManifest() {

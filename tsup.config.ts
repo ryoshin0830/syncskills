@@ -5,7 +5,7 @@ export default defineConfig({
   format: ['esm'],
   target: 'node22',
   clean: true,
-  // One file, no runtime dependencies: `npx syncskills` then has nothing to
+  // One file, no runtime dependencies: `npx oneset` then has nothing to
   // resolve or install beyond the tarball itself. Splitting would also move the
   // entrypoint guard into a chunk, where import.meta.url no longer matches argv.
   splitting: false,

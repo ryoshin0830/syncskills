@@ -47,14 +47,14 @@ export async function conflictsCommand(
     if (wanted !== undefined && wanted !== 'local' && wanted !== 'remote') {
       const msg = `unknown side "${wanted}"; expected local or remote`
       if (io.json) emitJsonError('conflicts', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
+      else process.stderr.write(`oneset: ${msg}\n`)
       return EXIT.ERROR
     }
     const snap = snapshots.find((s) => s.id === id)
     if (snap === undefined) {
-      const msg = `no snapshot ${id ?? '(none)'}; run \`syncskills conflicts\` to list them`
+      const msg = `no snapshot ${id ?? '(none)'}; run \`oneset conflicts\` to list them`
       if (io.json) emitJsonError('conflicts', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
+      else process.stderr.write(`oneset: ${msg}\n`)
       return EXIT.ERROR
     }
     // Restoring the REMOTE side is the whole point after a bad merge, so it
@@ -64,7 +64,7 @@ export async function conflictsCommand(
     if (!existsSync(join(snap.path, side))) {
       const msg = `snapshot ${snap.id} has no ${side} side`
       if (io.json) emitJsonError('conflicts', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
+      else process.stderr.write(`oneset: ${msg}\n`)
       return EXIT.ERROR
     }
     const dest = join(opts.paths.skillsDir, snap.item)
@@ -78,6 +78,6 @@ export async function conflictsCommand(
 
   const msg = `unknown subcommand ${sub}; expected list or restore`
   if (io.json) emitJsonError('conflicts', msg, io)
-  else process.stderr.write(`syncskills: ${msg}\n`)
+  else process.stderr.write(`oneset: ${msg}\n`)
   return EXIT.ERROR
 }

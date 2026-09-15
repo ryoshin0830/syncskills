@@ -22,7 +22,7 @@ export interface CapturedRun {
 }
 
 /**
- * One simulated machine: its own cc-switch home, its own syncskills config
+ * One simulated machine: its own cc-switch home, its own oneset config
  * directory, and a stub cc-switch binary that applies matrix changes straight
  * to that home's database. Two of these plus a bare repository reproduce the
  * whole product with no network and no risk to real data.
@@ -108,7 +108,7 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
 
   const config: Config = {
     schemaVersion: 1, host: 'github.com', owner: 'o', repo: 'r', branch: 'main',
-    device: name, vault: 'agent', item: 'syncskills', secrets: false, excludes: [],
+    device: name, vault: 'agent', item: 'oneset', secrets: false, excludes: [],
   }
 
   const options = (over: Partial<EngineOptions> = {}): EngineOptions => ({

@@ -24,9 +24,9 @@ export async function configCommand(
 
   const config = await loadConfig(dir)
   if (config === null) {
-    const msg = 'not initialized — run `syncskills init`'
+    const msg = 'not initialized — run `oneset init`'
     if (io.json) emitJsonError('config', msg, io)
-    else process.stderr.write(`syncskills: ${msg}\n`)
+    else process.stderr.write(`oneset: ${msg}\n`)
     return EXIT.UNINITIALIZED
   }
 
@@ -34,7 +34,7 @@ export async function configCommand(
     if (key === undefined || !isKey(key)) {
       const msg = `unknown key ${key ?? '(none)'}; valid keys: ${KEYS.join(', ')}`
       if (io.json) emitJsonError('config', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
+      else process.stderr.write(`oneset: ${msg}\n`)
       return EXIT.ERROR
     }
     if (io.json) emitJson('config', { key, value: config[key] }, io)
@@ -44,9 +44,9 @@ export async function configCommand(
 
   if (sub === 'set') {
     if (key === undefined || !isKey(key) || value === undefined) {
-      const msg = `usage: syncskills config set <key> <value>; valid keys: ${KEYS.join(', ')}`
+      const msg = `usage: oneset config set <key> <value>; valid keys: ${KEYS.join(', ')}`
       if (io.json) emitJsonError('config', msg, io)
-      else process.stderr.write(`syncskills: ${msg}\n`)
+      else process.stderr.write(`oneset: ${msg}\n`)
       return EXIT.ERROR
     }
     const next: Config = { ...config }
@@ -62,7 +62,7 @@ export async function configCommand(
 
   const msg = `unknown subcommand ${sub}; expected path, get or set`
   if (io.json) emitJsonError('config', msg, io)
-  else process.stderr.write(`syncskills: ${msg}\n`)
+  else process.stderr.write(`oneset: ${msg}\n`)
   return EXIT.ERROR
 }
 
