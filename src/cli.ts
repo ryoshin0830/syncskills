@@ -66,7 +66,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { command: command === '' ? 'tui' : command, positionals, flags }
 }
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { helpFor, ROOT_HELP } from './help.js'
 import { flagsNotUsedBy, parseOnly, parseAgent } from './flags.js'
 import { emitJson, emitJsonError } from './output.js'
@@ -172,12 +172,35 @@ export async function main(argv: string[]): Promise<number> {
   return dispatch(args, args.flags.json === true)
 }
 
-// process.argv[1] can be relative, so it must go through pathToFileURL rather
-// than being pasted after "file://" — otherwise the first path segment is
-// parsed as a hostname and the comparison silently never matches.
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href
+/**
+ * Whether this file is the program being run, rather than something imported.
+ *
+ * Two traps, and getting either wrong means the CLI exits 0 having printed
+ * nothing — which is indistinguishable from success to anything calling it.
+ *
+ * `process.argv[1]` can be relative, so it goes through pathToFileURL rather
+ * than being pasted after "file://": otherwise the first path segment is parsed
+ * as a hostname and the comparison silently never matches.
+ *
+ * And npm installs a bin as a SYMLINK into node_modules/.bin, so when a user
+ * runs `npx syncskills` — the one thing the README tells them to type — argv[1]
+ * is the link while import.meta.url is the file it points at. Both sides are
+ * resolved to their real path before being compared.
+ */
+function isEntrypoint(): boolean {
+  const argv1 = process.argv[1]
+  if (argv1 === undefined) return false
+  const here = fileURLToPath(import.meta.url)
+  try {
+    return realpathSync(argv1) === realpathSync(here)
+  } catch {
+    // argv[1] need not be a real file — a runner may pass anything. Fall back
+    // to comparing what we were given.
+    return import.meta.url === pathToFileURL(argv1).href
+  }
+}
+
+const invokedDirectly = isEntrypoint()
 
 if (invokedDirectly) {
   main(process.argv.slice(2))

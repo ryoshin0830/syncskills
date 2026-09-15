@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { existsSync } from 'node:fs'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, readdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run } from '../src/util/exec.js'
@@ -129,5 +129,75 @@ describe('built CLI', () => {
     const t = Date.now()
     await run('node', ['dist/cli.js', '--help'])
     expect(Date.now() - t).toBeLessThan(1500)
+  })
+})
+
+/**
+ * Run the CLI the way a user does: `npm pack`, install the tarball somewhere
+ * else, and invoke it through the bin link npm creates.
+ *
+ * The tests above run the built artifact as `node dist/cli.js`, where
+ * `process.argv[1]` is the file itself. npm installs a bin as a SYMLINK into
+ * node_modules/.bin, so argv[1] is the link while `import.meta.url` is the file
+ * it points at. The entrypoint guard compared the two without resolving either,
+ * so `npx syncskills` ran nothing at all and exited 0 — the one thing the
+ * README tells people to type. Only installing it catches that.
+ *
+ * It shares the build above deliberately: tsup cleans dist/, so a second build
+ * running concurrently would delete the artifact these tests are reading.
+ */
+describe('the package as a user installs it', () => {
+  let bin: string
+
+  beforeAll(async () => {
+    const shelf = await mkdtemp(join(tmpdir(), 'ss-pack-'))
+    const packed = await run('npm', ['pack', '--pack-destination', shelf])
+    expect(packed.code, packed.stderr).toBe(0)
+    const tarball = (await readdir(shelf)).find((f) => f.endsWith('.tgz'))
+    expect(tarball, 'npm pack produced no tarball').toBeDefined()
+
+    const consumer = await mkdtemp(join(tmpdir(), 'ss-consumer-'))
+    await writeFile(
+      join(consumer, 'package.json'),
+      JSON.stringify({ name: 'consumer', version: '1.0.0', private: true }) + '\n',
+    )
+    const installed = await run(
+      'npm', ['install', '--no-audit', '--no-fund', join(shelf, tarball!)], { cwd: consumer },
+    )
+    expect(installed.code, installed.stderr).toBe(0)
+
+    bin = join(consumer, 'node_modules', '.bin', 'syncskills')
+  }, 180_000)
+
+  it('links both bin names', async () => {
+    const names = await readdir(join(bin, '..'))
+    expect(names).toContain('syncskills')
+    expect(names).toContain('ssync')
+  })
+
+  it('prints its version through the bin link', async () => {
+    const r = await run(bin, ['--version'])
+    expect(r.code).toBe(0)
+    expect(r.stdout.trim()).toMatch(/^syncskills \d+\.\d+\.\d+/)
+  })
+
+  it('prints help through the bin link', async () => {
+    const r = await run(bin, ['--help'])
+    expect(r.code).toBe(0)
+    expect(r.stdout).toContain('USAGE')
+    expect(r.stdout).toContain('EXIT CODES')
+  })
+
+  it('still reports an unknown command as an error', async () => {
+    const r = await run(bin, ['definitely-not-a-command'])
+    expect(r.code).toBe(1)
+    expect(r.stderr).toContain('unknown command')
+  })
+
+  it('reports "not initialized" with exit 3, not silence', async () => {
+    const r = await run(bin, ['status'], {
+      env: { SYNCSKILLS_CONFIG_DIR: await mkdtemp(join(tmpdir(), 'ss-empty-')) },
+    })
+    expect(r.code).toBe(3)
   })
 })
