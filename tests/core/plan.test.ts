@@ -115,3 +115,27 @@ describe('pruneBackups', () => {
     expect(await pruneBackups(root, 10)).toEqual([])
   })
 })
+
+describe('buildPlan — items that already agree', () => {
+  it('collects them so their base can be recorded', () => {
+    const p = buildPlan([
+      r('same', S('A'), S('A'), S('A')),
+      r('push', S('A'), S('B'), S('A')),
+    ])
+    expect(p.inSync.map((x) => x.id)).toEqual(['same'])
+  })
+
+  it('does not collect an item that exists on neither side', () => {
+    expect(buildPlan([r('gone', undefined, undefined, undefined)]).inSync).toEqual([])
+  })
+
+  it('collects an item whose content agrees even though its matrix does not', () => {
+    const p = buildPlan([r('m', S('A', ['claude']), S('A', ['claude', 'codex']), S('A', ['claude']))])
+    expect(p.inSync.map((x) => x.id)).toEqual(['m'])
+  })
+
+  it('returns them sorted for stable output', () => {
+    const p = buildPlan([r('z', S('A'), S('A'), S('A')), r('a', S('A'), S('A'), S('A'))])
+    expect(p.inSync.map((x) => x.id)).toEqual(['a', 'z'])
+  })
+})

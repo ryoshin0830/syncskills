@@ -3,8 +3,8 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { copyTree, walk } from '../util/fs.js'
 import { treeHash, canonicalJsonHash } from './hash.js'
-import { setBase } from '../state.js'
-import { saveBaseTree, dropBaseTree } from '../basetree.js'
+import { setBase, stateKey } from '../state.js'
+import { saveBaseTree, dropBaseTree, existingBaseTree } from '../basetree.js'
 import { upsertEntry, removeEntry } from '../store/manifest.js'
 import { scanForSecrets } from '../secrets/scan.js'
 import { stripSecrets } from '../ccswitch/read.js'
@@ -85,8 +85,9 @@ export async function assertNoSecrets(dir: string, label: string): Promise<void>
 
 export async function applyPlan(plan: Plan, ctx: ApplyContext): Promise<ApplyResult> {
   const result: ApplyResult = { applied: [], failed: [], pending: [], backupDir: null }
+  if (!ctx.dryRun) await recordAgreedBases(plan, ctx)
   if (plan.actions.length === 0) return result
-  if (!ctx.dryRun) result.backupDir = await snapshot(ctx)
+  result.backupDir = await snapshot(ctx)
 
   let touchedSkills = false
 
@@ -128,6 +129,30 @@ async function applyMergedApps(ctx: ApplyContext, action: Action): Promise<void>
   else if (kind === 'mcp') await ctx.writer.setMcpApps(id, resolution.apps)
 }
 
+/**
+ * Write down what this machine and the remote already agree on. Nothing is
+ * changed anywhere: it only fills in a base that was never recorded, or a base
+ * tree that a matrix-only update left behind. Without it a later divergence
+ * looks like two independent creations and cannot be merged three-way.
+ */
+async function recordAgreedBases(plan: Plan, ctx: ApplyContext): Promise<void> {
+  for (const r of plan.inSync) {
+    const local = r.local!
+    const recorded = ctx.state.items[stateKey(r.kind, r.id)]
+    const hashMatches = recorded?.contentHash === local.contentHash
+    const appsMatch = JSON.stringify(recorded?.apps) === JSON.stringify(local.apps)
+    const treeMissing =
+      r.kind === 'skill' && existingBaseTree(ctx.configDir, r.kind, r.id) === undefined
+
+    if (hashMatches && appsMatch && !treeMissing) continue
+
+    setBase(ctx.state, r.kind, r.id, { contentHash: local.contentHash, apps: local.apps })
+    if (r.kind === 'skill') {
+      await saveBaseTree(ctx.configDir, r.kind, r.id, join(ctx.paths.skillsDir, r.id))
+    }
+  }
+}
+
 async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pending'> {
   const { kind, id, resolution } = action
 
@@ -138,6 +163,9 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
       const side = { contentHash: resolution.local!.contentHash, apps: resolution.apps }
       setBase(ctx.state, kind, id, side)
+      if (kind === 'skill') {
+        await saveBaseTree(ctx.configDir, kind, id, join(ctx.paths.skillsDir, id))
+      }
       upsertEntry(ctx.manifest, kind, id, side, ctx.device)
       return 'done'
     }

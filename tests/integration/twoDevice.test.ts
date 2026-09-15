@@ -382,3 +382,34 @@ describe('unsafe ids are refused symmetrically', () => {
     expect(await B.readSkill('.hidden')).toBeNull()
   })
 })
+
+describe('base trees exist wherever a merge might need one', () => {
+  it('records one for a skill that arrived identical on both devices', async () => {
+    const body = skill('twin', 'identical')
+    await A.writeSkill('twin', body)
+    await B.writeSkill('twin', body)
+    await A.sync()
+    await B.sync()
+
+    const { existingBaseTree } = await import('../../src/basetree.js')
+    expect(existingBaseTree(B.configDir, 'skill', 'twin')).toBeDefined()
+    expect(existingBaseTree(A.configDir, 'skill', 'twin')).toBeDefined()
+  })
+
+  it('merges three-way rather than treating a later divergence as two creations', async () => {
+    const body = skill('twin', 'line1\nline2\nline3')
+    await A.writeSkill('twin', body)
+    await B.writeSkill('twin', body)
+    await A.sync(); await B.sync(); await A.sync()
+
+    await A.writeSkill('twin', skill('twin', 'A-LINE\nline2\nline3'))
+    await B.writeSkill('twin', skill('twin', 'line1\nline2\nB-LINE'))
+    await B.sync()
+
+    const out = await A.sync()
+    const conflict = out.unresolved.find((c) => c.id === 'twin')!
+    // With a base recorded, this is a concurrent edit — not two independent
+    // creations, which is what it would look like with no base at all.
+    expect(conflict.resolution.conflictKind).toBe('both-edited')
+  })
+})

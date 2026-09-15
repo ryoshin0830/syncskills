@@ -14,6 +14,13 @@ export interface Action {
 export interface Plan {
   actions: Action[]
   conflicts: Action[]
+  /**
+   * Items whose content already agrees. They need no action, but the base we
+   * have recorded for them may be missing or stale — and a missing base turns a
+   * later divergence into a "both created it" conflict instead of a clean
+   * three-way merge.
+   */
+  inSync: Resolution[]
   counts: Record<ActionType, number>
 }
 
@@ -50,10 +57,12 @@ export function buildPlan(resolutions: Resolution[]): Plan {
   const counts = Object.fromEntries(ORDER.map((t) => [t, 0])) as Record<ActionType, number>
   const actions: Action[] = []
   const conflicts: Action[] = []
+  const inSync: Resolution[] = []
 
   for (const r of resolutions) {
     const type = typeFor(r)
     counts[type]++
+    if (r.decision === 'IN_SYNC' && r.local !== undefined) inSync.push(r)
     if (type === 'noop') continue
     const action: Action = { type, kind: r.kind, id: r.id, resolution: r }
     if (type === 'merge') conflicts.push(action)
@@ -70,5 +79,9 @@ export function buildPlan(resolutions: Resolution[]): Plan {
     a.kind !== b.kind ? (a.kind < b.kind ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
   )
 
-  return { actions, conflicts, counts }
+  inSync.sort((a, b) =>
+    a.kind !== b.kind ? (a.kind < b.kind ? -1 : 1) : a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  )
+
+  return { actions, conflicts, inSync, counts }
 }
