@@ -1,0 +1,51 @@
+{
+  "name": "syncskills",
+  "version": "0.1.0",
+  "description": "Perfect multi-device sync for AI agent skills and MCP servers, built on cc-switch, GitHub and 1Password.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "bin": {
+    "syncskills": "./dist/cli.js",
+    "ssync": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryoshin0830/syncskills.git"
+  },
+  "keywords": [
+    "skills",
+    "mcp",
+    "sync",
+    "cc-switch",
+    "claude-code",
+    "codex",
+    "hermes",
+    "cli"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@clack/prompts": "^0.11.0",
+    "@types/node": "^22.10.0",
+    "picocolors": "^1.1.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
