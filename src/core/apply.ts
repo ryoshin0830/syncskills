@@ -165,13 +165,16 @@ async function recordAgreedBases(plan: Plan, ctx: ApplyContext): Promise<void> {
     const hashMatches = recorded?.contentHash === local.contentHash
     const appsMatch = JSON.stringify(recorded?.apps) === JSON.stringify(local.apps)
     const treeMissing =
-      r.kind === 'skill' && existingBaseTree(ctx.configDir, r.kind, r.id) === undefined
+      r.kind === 'skill' &&
+      existingBaseTree(ctx.configDir, r.kind, r.id, recorded?.contentHash) === undefined
 
     if (hashMatches && appsMatch && !treeMissing) continue
 
     setBase(ctx.state, r.kind, r.id, { contentHash: local.contentHash, apps: local.apps })
     if (r.kind === 'skill') {
-      await saveBaseTree(ctx.configDir, r.kind, r.id, join(ctx.paths.skillsDir, r.id))
+      await saveBaseTree(
+        ctx.configDir, r.kind, r.id, join(ctx.paths.skillsDir, r.id), local.contentHash,
+      )
     }
   }
 }
@@ -190,7 +193,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
       const side = { contentHash: resolution.local!.contentHash, apps: resolution.apps }
       setBase(ctx.state, kind, id, side)
       if (kind === 'skill') {
-        await saveBaseTree(ctx.configDir, kind, id, join(ctx.paths.skillsDir, id))
+        await saveBaseTree(ctx.configDir, kind, id, join(ctx.paths.skillsDir, id), side.contentHash)
       }
       upsertEntry(ctx.manifest, kind, id, side, ctx.device)
       return 'done'
@@ -206,7 +209,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         await ctx.writer.importSkill(id, resolution.apps)
         const pulled = { contentHash: await treeHash(dest), apps: resolution.apps }
         setBase(ctx.state, kind, id, pulled)
-        await saveBaseTree(ctx.configDir, kind, id, dest)
+        await saveBaseTree(ctx.configDir, kind, id, dest, pulled.contentHash)
         // The merged matrix must reach the manifest as well; otherwise the
         // remote still advertises the old one and the next run pulls it back.
         upsertEntry(ctx.manifest, kind, id, pulled, ctx.device)
@@ -273,7 +276,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
         const side = { contentHash: await treeHash(src), apps: resolution.apps }
         setBase(ctx.state, kind, id, side)
-        await saveBaseTree(ctx.configDir, kind, id, src)
+        await saveBaseTree(ctx.configDir, kind, id, src, side.contentHash)
         upsertEntry(ctx.manifest, kind, id, side, ctx.device)
         return 'done'
       }

@@ -81,6 +81,33 @@ describe('a credential store that cannot be read', () => {
  * repo-only run touches a credential, and the blob it never read must not be
  * written back either.
  */
+/**
+ * The guard turns a rejection into a reason string. A provider that rejects with
+ * something other than an Error — a string, a value from a library that does not
+ * subclass Error — has no `.message`, which left the reason undefined and the
+ * guard silently satisfied: straight back to writing an empty blob over every
+ * credential.
+ */
+describe('a credential store that rejects with something other than an Error', () => {
+  function oddProvider(): SecretProvider & { writes: SecretBlob[] } {
+    const writes: SecretBlob[] = []
+    return {
+      writes,
+      read(): Promise<SecretBlob> { return Promise.reject('op exploded') },
+      async write(b) { writes.push(structuredClone(b)) },
+      async check() { return { ok: false, detail: 'odd' } },
+    }
+  }
+
+  it('is still treated as unreadable', async () => {
+    const a = await makeDevice('D', await makeBareRemote())
+    const p = oddProvider()
+    await expect(a.sync({ useSecrets: true, secretProvider: p }))
+      .rejects.toThrow(/could not read the credential store/)
+    expect(p.writes).toEqual([])
+  })
+})
+
 describe('the way out the refusal offers', () => {
   let a: Device
 

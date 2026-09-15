@@ -392,8 +392,10 @@ describe('base trees exist wherever a merge might need one', () => {
     await B.sync()
 
     const { existingBaseTree } = await import('../../src/basetree.js')
-    expect(existingBaseTree(B.configDir, 'skill', 'twin')).toBeDefined()
-    expect(existingBaseTree(A.configDir, 'skill', 'twin')).toBeDefined()
+    const hashOf = async (d: typeof A) =>
+      (await d.readState()).items['skill:twin']?.contentHash
+    expect(existingBaseTree(B.configDir, 'skill', 'twin', await hashOf(B))).toBeDefined()
+    expect(existingBaseTree(A.configDir, 'skill', 'twin', await hashOf(A))).toBeDefined()
   })
 
   it('merges three-way rather than treating a later divergence as two creations', async () => {

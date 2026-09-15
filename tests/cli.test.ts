@@ -1,5 +1,21 @@
 import { describe, it, expect } from 'vitest'
-import { parseArgs, unknownFlags, packageVersion, EXIT } from '../src/cli.js'
+import { parseArgs, unknownFlags, packageVersion, EXIT, main } from '../src/cli.js'
+
+/** Run main() and capture what a wrapper reading stdout would receive. */
+async function capture(argv: string[]): Promise<{ code: number; out: string }> {
+  const written: string[] = []
+  const original = process.stdout.write.bind(process.stdout)
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    written.push(String(chunk))
+    return true
+  }) as typeof process.stdout.write
+  try {
+    const code = await main(argv)
+    return { code, out: written.join('') }
+  } finally {
+    process.stdout.write = original
+  }
+}
 import { parseOnly } from '../src/flags.js'
 
 describe('parseArgs', () => {
@@ -101,5 +117,34 @@ describe('parseOnly', () => {
 describe('packageVersion', () => {
   it('reports the version from the package manifest', () => {
     expect(packageVersion()).toMatch(/^\d+\.\d+\.\d+/)
+  })
+})
+
+/**
+ * `--json` is a promise: every command returns an envelope, and a wrapper parses
+ * stdout. Three early returns broke it — `--version`, `--help` and a bare
+ * invocation with stdout not a TTY (a cron job, a pipe) wrote plain text and
+ * exited 0, so the wrapper got help text where it expected JSON.
+ */
+describe('--json is honoured by the early exits too', () => {
+  it('returns an envelope for --version', async () => {
+    const { code, out } = await capture(['--version', '--json'])
+    expect(code).toBe(0)
+    const envelope = JSON.parse(out) as { ok: boolean; data: { version: string } }
+    expect(envelope.ok).toBe(true)
+    expect(envelope.data.version).toMatch(/^\d+\.\d+\.\d+/)
+  })
+
+  it('returns an envelope for --help', async () => {
+    const { code, out } = await capture(['--help', '--json'])
+    expect(code).toBe(0)
+    const envelope = JSON.parse(out) as { ok: boolean; data: { help: string } }
+    expect(envelope.data.help).toContain('USAGE')
+  })
+
+  it('returns an envelope when the interface cannot open', async () => {
+    const { out } = await capture(['--no-tui', '--json'])
+    const envelope = JSON.parse(out) as { ok: boolean; data: { help: string } }
+    expect(envelope.data.help).toContain('USAGE')
   })
 })

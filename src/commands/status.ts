@@ -18,9 +18,13 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
   // fatal — but it must be reported, or the MCP rows below are read against a
   // blob that is empty for the wrong reason.
   if (opts.useSecrets && secretsUnreadable !== undefined) {
+    // Only a run that touches MCP servers refuses; saying otherwise would send
+    // the user looking for a problem that does not block them.
+    const blocks = (opts.only ?? ['skill', 'mcp', 'repo']).includes('mcp')
     io.warnings.push(
       `could not read the credential store: ${secretsUnreadable}; ` +
-      `MCP credentials could not be checked, and a sync will refuse to run until it is reachable`,
+      `MCP credentials could not be checked` +
+      (blocks ? ', and a sync will refuse to run until it is reachable' : ''),
     )
   }
 

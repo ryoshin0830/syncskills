@@ -69,7 +69,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 import { readFileSync } from 'node:fs'
 import { helpFor, ROOT_HELP } from './help.js'
 import { flagsNotUsedBy, parseOnly, parseAgent } from './flags.js'
-import { emitJsonError } from './output.js'
+import { emitJson, emitJsonError } from './output.js'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { silenceSqliteExperimentalWarning } from './util/sqlite.js'
 
@@ -144,18 +144,27 @@ export async function main(argv: string[]): Promise<number> {
     return EXIT.ERROR
   }
 
+  // These three return before dispatch, so they have to honour --json
+  // themselves. A wrapper that asked for the envelope and got help text is
+  // exactly the shape --json exists to rule out.
+  const io = { json: true, quiet: false, verbose: false, warnings: [] }
+
   if (args.flags.version === true) {
-    process.stdout.write(`syncskills ${packageVersion()}\n`)
+    if (args.flags.json === true) emitJson('version', { version: packageVersion() }, io)
+    else process.stdout.write(`syncskills ${packageVersion()}\n`)
     return EXIT.OK
   }
 
   if (args.flags.help === true || args.command === 'help') {
     const topic = args.command === 'help' ? args.positionals[0] : args.command
-    process.stdout.write(helpFor(topic ?? 'tui') + '\n')
+    const text = helpFor(topic ?? 'tui')
+    if (args.flags.json === true) emitJson('help', { topic: topic ?? 'tui', help: text }, io)
+    else process.stdout.write(text + '\n')
     return EXIT.OK
   }
   if (args.command === 'tui' && (args.flags['no-tui'] === true || !process.stdout.isTTY)) {
-    process.stdout.write(ROOT_HELP + '\n')
+    if (args.flags.json === true) emitJson('help', { topic: 'tui', help: ROOT_HELP }, io)
+    else process.stdout.write(ROOT_HELP + '\n')
     return EXIT.OK
   }
 

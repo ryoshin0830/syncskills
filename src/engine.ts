@@ -140,8 +140,12 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
   // A read that fails is not a read that returned nothing. The distinction is
   // kept rather than flattened, because the caller has to refuse to write.
   let secretsUnreadable: string | undefined
-  const blob = await secrets.read().catch((e: Error) => {
-    secretsUnreadable = e.message
+  const blob = await secrets.read().catch((e: unknown) => {
+    // Never `e.message` alone: a rejection that is not an Error has none, and a
+    // reason of `undefined` reads as "the store was fine" — which is exactly
+    // the wipe this guard exists to prevent.
+    const why = e instanceof Error ? e.message : String(e)
+    secretsUnreadable = why === '' ? 'the credential store rejected the read' : why
     return emptyBlob()
   })
 
@@ -353,10 +357,13 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
       // state.json stays as it was, deliberately. Recording a base for an item
       // whose content never reached the store would make the next run read
       // "local matches base, remote has nothing" as a deletion and remove it.
-      // The base TREES were already written, though, so they have to come back
-      // out: a tree state.json does not describe would otherwise be used as the
-      // ancestor of a merge that never agreed on it.
-      await dropWrittenBases(opts.configDir, plan, result)
+      //
+      // The base trees written during apply need no compensation here: each one
+      // carries the hash it was saved for and is only offered when state.json
+      // still agrees, so one this run wrote is already invisible. Deleting them
+      // instead used to take untouched items' ancestors with them, and only
+      // covered this one exit — a network failure, a failing secret write or a
+      // Ctrl-C left a tree that lied.
     }
   }
 
@@ -397,19 +404,3 @@ export async function dropStoredSecrets(
   if (changed) await secrets.write(blob)
 }
 
-/**
- * Undo the base trees a run wrote when its state could not be saved. These two
- * are one record — a hash in state.json and the content it names — so half of
- * it is worse than none.
- */
-export async function dropWrittenBases(
-  configDir: string, plan: Plan, result: ApplyResult,
-): Promise<void> {
-  const touched = [
-    ...result.applied.map((a) => ({ kind: a.kind, id: a.id })),
-    ...plan.inSync.map((r) => ({ kind: r.kind, id: r.id })),
-  ]
-  for (const { kind, id } of touched) {
-    if (kind === 'skill') await dropBaseTree(configDir, kind, id)
-  }
-}

@@ -75,7 +75,7 @@ describe('two devices pushing at the same time', () => {
     expect(await b.readRemoteFile('skills/gamma/SKILL.md')).toContain('name: gamma')
   })
 
-  it('never leaves a base tree behind that state.json does not describe', async () => {
+  it('never offers a base tree that state.json does not describe', async () => {
     await a.writeSkill('alpha', '---\nname: alpha\ndescription: a\n---\nA\n')
     await a.sync()
     await b.sync()
@@ -85,11 +85,14 @@ describe('two devices pushing at the same time', () => {
     await b.sync()
 
     // A base tree with no recorded base would be used as the ancestor of a
-    // three-way merge that never actually agreed on it.
+    // three-way merge that never actually agreed on it. The directory may well
+    // still be on disk — what matters is that it is not offered.
+    const { existingBaseTree } = await import('../../src/basetree.js')
     const state = await b.readState()
-    const orphan = existsSync(join(b.configDir, 'base', 'skill', 'gamma'))
-      && state.items['skill:gamma'] === undefined
-    expect(orphan).toBe(false)
+    expect(state.items['skill:gamma']).toBeUndefined()
+    expect(
+      existingBaseTree(b.configDir, 'skill', 'gamma', state.items['skill:gamma']?.contentHash),
+    ).toBeUndefined()
   })
 
   it('still prints a JSON envelope saying it failed', async () => {
@@ -104,5 +107,52 @@ describe('two devices pushing at the same time', () => {
     expect(runResult.envelope).not.toBeNull()
     expect(runResult.envelope!.ok).toBe(false)
     expect(runResult.code).toBe(1)
+  })
+})
+
+/**
+ * A rejected push used to drop the base TREE of every in-sync item, including
+ * ones the run never touched. If such an item later conflicted, nothing would
+ * restore its tree — recordAgreedBases only runs for items that are in sync —
+ * and the merge ran with no ancestor at all.
+ *
+ * The tree now carries the hash it was saved for, so a stale one is simply
+ * never offered; there is nothing left to drop, and an untouched one survives.
+ */
+describe('a push race and an unrelated base tree', () => {
+  it('leaves an untouched item’s base tree in place', async () => {
+    await a.writeSkill('alpha', '---\nname: alpha\ndescription: a\n---\nA\n')
+    await a.sync()
+    await b.sync()
+
+    const { existingBaseTree } = await import('../../src/basetree.js')
+    const hash = async () => (await b.readState()).items['skill:alpha']?.contentHash
+    expect(existingBaseTree(b.configDir, 'skill', 'alpha', await hash())).toBeDefined()
+
+    await raceOnNextPush(b)
+    await b.writeSkill('gamma', '---\nname: gamma\ndescription: g\n---\nG\n')
+    const out = await b.sync()
+
+    expect(out.pushRejected).toBeTypeOf('string')
+    expect(
+      existingBaseTree(b.configDir, 'skill', 'alpha', await hash()),
+      'the race dropped an untouched item’s ancestor',
+    ).toBeDefined()
+  })
+
+  it('does not offer the base tree of the item whose push was rejected', async () => {
+    await a.writeSkill('alpha', '---\nname: alpha\ndescription: a\n---\nA\n')
+    await a.sync()
+    await b.sync()
+
+    await raceOnNextPush(b)
+    await b.writeSkill('alpha', '---\nname: alpha\ndescription: a\n---\nA-edited\n')
+    await b.sync()
+
+    const { existingBaseTree } = await import('../../src/basetree.js')
+    const recorded = (await b.readState()).items['skill:alpha']?.contentHash
+    // state.json still names the version before the edit, so the tree written
+    // for the edited one must not be usable as an ancestor.
+    expect(existingBaseTree(b.configDir, 'skill', 'alpha', recorded)).toBeUndefined()
   })
 })

@@ -21,7 +21,7 @@ import type { ChoiceSide } from './conflictChoice.js'
 import { EXIT } from '../cli.js'
 import { answer } from '../prompt.js'
 import { PushRejected } from '../store/git.js'
-import { dropWrittenBases, dropStoredSecrets } from '../engine.js'
+import { dropStoredSecrets } from '../engine.js'
 import { stateKey } from '../state.js'
 import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
@@ -116,10 +116,8 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       return { pushed: ok }
     } catch (e) {
       if (!(e instanceof PushRejected)) throw e
-      await dropWrittenBases(
-        opts.configDir, plan,
-        result ?? { applied: [], failed: [], pending: [], backupDir: null, secretsToDrop: [] },
-      )
+      // Nothing to undo: see runSync. A base tree this run wrote is paired with
+      // a hash state.json does not hold, so it is already not an ancestor.
       return { pushed: false, rejected: e.message }
     }
   }
@@ -194,9 +192,11 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       // Only a base state.json vouches for: a tree left behind by a run that
       // could not publish describes an agreement that never happened, and using
       // it as the ancestor would read one side's file as deleted by the other.
-      const baseDir = state.items[stateKey('skill', c.id)] === undefined
-        ? undefined
-        : existingBaseTree(opts.configDir, 'skill', c.id)
+      // existingBaseTree checks that pairing itself, against the hash the tree
+      // was saved for — a state entry merely EXISTING is not the same thing.
+      const baseDir = existingBaseTree(
+        opts.configDir, 'skill', c.id, state.items[stateKey('skill', c.id)]?.contentHash,
+      )
       const report = await mergeTrees({
         ...(baseDir === undefined ? {} : { baseDir }),
         localDir, remoteDir, outDir, agent,
@@ -263,7 +263,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
       const side = { contentHash: await treeHash(localDir), apps: c.resolution.apps }
       setBase(state, 'skill', c.id, side)
-      await saveBaseTree(opts.configDir, 'skill', c.id, localDir)
+      await saveBaseTree(opts.configDir, 'skill', c.id, localDir, side.contentHash)
       upsertEntry(manifest, 'skill', c.id, side, opts.config.device)
 
       await rm(store.itemDir('skill', c.id), { recursive: true, force: true })
