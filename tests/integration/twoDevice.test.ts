@@ -294,3 +294,33 @@ describe('app matrix convergence (regression: a merged matrix must reach both si
     expect(B.readSkillApps('s')).toEqual(['claude', 'hermes'])
   })
 })
+
+describe('MCP servers end to end', () => {
+  it('lands the server on the receiving device, not just in the store', async () => {
+    A.addMcpServer('oracle', { type: 'stdio', command: 'oracle-mcp', args: [] }, ['claude', 'codex'])
+    await A.sync()
+    await B.sync()
+
+    const rows = B.listMcpRows()
+    expect(rows.map((r) => r.id)).toEqual(['oracle'])
+    expect(rows[0]!.config).toMatchObject({ type: 'stdio', command: 'oracle-mcp' })
+    expect(rows[0]!.apps).toEqual(['claude', 'codex'])
+  })
+
+  it('converges for a tagged server, which cc-switch cannot transfer tags for', async () => {
+    A.addMcpServerWithTags('tagged', { type: 'stdio', command: 'x' }, ['claude'], ['a', 'b'])
+    await A.sync()
+    await B.sync()
+
+    // B receives the server; the tags stay on A, and neither side loops.
+    expect(B.listMcpRows().map((r) => r.id)).toEqual(['tagged'])
+    expect((await B.sync()).plan.actions).toHaveLength(0)
+    expect((await A.sync()).plan.actions).toHaveLength(0)
+  })
+
+  it('converges for a plain server too', async () => {
+    A.addMcpServer('plain', { type: 'stdio', command: 'x' }, ['claude'])
+    await A.sync(); await B.sync()
+    expect((await B.sync()).plan.actions).toHaveLength(0)
+  })
+})

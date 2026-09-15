@@ -1,3 +1,4 @@
+import { isSafeItemId } from '../core/types.js'
 import type { App, ItemKind, Side } from '../core/types.js'
 import { stateKey } from '../state.js'
 
@@ -58,9 +59,21 @@ export function serializeManifest(m: Manifest): string {
 export function manifestSides(m: Manifest, kind: ItemKind): Map<string, Side> {
   const out = new Map<string, Side>()
   for (const e of Object.values(m.entries)) {
-    if (e.kind === kind) out.set(e.id, { contentHash: e.contentHash, apps: e.apps })
+    if (e.kind !== kind) continue
+    // Ids from the remote are untrusted input: they become filesystem paths on
+    // this machine. One that could climb out of its directory is dropped.
+    if (!isSafeItemId(kind, e.id)) continue
+    out.set(e.id, { contentHash: e.contentHash, apps: e.apps })
   }
   return out
+}
+
+/** Ids in the manifest that were refused as unsafe, for reporting. */
+export function unsafeManifestIds(m: Manifest): string[] {
+  return Object.values(m.entries)
+    .filter((e) => !isSafeItemId(e.kind, e.id))
+    .map((e) => `${e.kind}:${e.id}`)
+    .sort()
 }
 
 export function upsertEntry(

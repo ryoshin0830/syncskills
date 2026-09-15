@@ -27,6 +27,12 @@ export function renderDiff(a: string, b: string, opts: { context?: number } = {}
   const A = a.split('\n')
   const B = b.split('\n')
 
+  // The LCS table is O(n·m); on a few-thousand-line file that is hundreds of
+  // megabytes. Past this size, report the shape of the change instead.
+  if (A.length * B.length > 4_000_000) {
+    return pc.dim(`  (${A.length} lines → ${B.length} lines; too large to diff inline)`)
+  }
+
   const lcs: number[][] = Array.from({ length: A.length + 1 }, () => new Array<number>(B.length + 1).fill(0))
   for (let i = A.length - 1; i >= 0; i--) {
     for (let j = B.length - 1; j >= 0; j--) {

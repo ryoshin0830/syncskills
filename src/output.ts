@@ -33,7 +33,3 @@ export function emitJsonError(command: string, message: string, io: Io): void {
 export function line(text: string, io: Io): void {
   if (!io.quiet) process.stdout.write(text + '\n')
 }
-
-export function detail(text: string, io: Io): void {
-  if (io.verbose && !io.quiet) process.stdout.write(pc.dim(text) + '\n')
-}

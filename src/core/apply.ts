@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { copyTree, walk } from '../util/fs.js'
 import { treeHash, canonicalJsonHash } from './hash.js'
 import { setBase } from '../state.js'
+import { saveBaseTree, dropBaseTree } from '../basetree.js'
 import { upsertEntry, removeEntry } from '../store/manifest.js'
 import { scanForSecrets } from '../secrets/scan.js'
 import { stripSecrets } from '../ccswitch/read.js'
@@ -151,6 +152,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         await ctx.writer.importSkill(id, resolution.apps)
         const pulled = { contentHash: await treeHash(dest), apps: resolution.apps }
         setBase(ctx.state, kind, id, pulled)
+        await saveBaseTree(ctx.configDir, kind, id, dest)
         // The merged matrix must reach the manifest as well; otherwise the
         // remote still advertises the old one and the next run pulls it back.
         upsertEntry(ctx.manifest, kind, id, pulled, ctx.device)
@@ -165,7 +167,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         const outcome = await ctx.writer.importMcpWithSecrets(id, config, env, resolution.apps)
         if (outcome === 'pending') return 'pending'
         const pulledMcp = {
-          contentHash: canonicalJsonHash({ config: sanitized, tags: [] }),
+          contentHash: canonicalJsonHash({ config: sanitized }),
           apps: resolution.apps,
         }
         setBase(ctx.state, kind, id, pulledMcp)
@@ -209,6 +211,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
         const side = { contentHash: await treeHash(src), apps: resolution.apps }
         setBase(ctx.state, kind, id, side)
+        await saveBaseTree(ctx.configDir, kind, id, src)
         upsertEntry(ctx.manifest, kind, id, side, ctx.device)
         return 'done'
       }
@@ -230,12 +233,15 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         }
 
         await ctx.store.writeItemJson('mcp', id, sanitized)
+        // Emptying a server's env must clear the stored values, not leave the
+        // old ones behind in 1Password.
         if (Object.keys(secrets).length > 0) ctx.blob.mcp[id] = { env: secrets }
+        else delete ctx.blob.mcp[id]
 
         await applyMergedApps(ctx, action)
 
         const side = {
-          contentHash: canonicalJsonHash({ config: sanitized, tags: payload.tags }),
+          contentHash: canonicalJsonHash({ config: sanitized }),
           apps: resolution.apps,
         }
         setBase(ctx.state, kind, id, side)
@@ -261,8 +267,11 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
     case 'delete-remote': {
       await ctx.store.removeItem(kind, id)
       removeEntry(ctx.manifest, kind, id)
-      delete ctx.blob.mcp[id]
+      // Only an MCP server owns a secret; a skill that happens to share its
+      // name must not drop it.
+      if (kind === 'mcp') delete ctx.blob.mcp[id]
       setBase(ctx.state, kind, id, undefined)
+      await dropBaseTree(ctx.configDir, kind, id)
       return 'done'
     }
 
@@ -282,6 +291,7 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         await ctx.writer.removeRepo(owner, name)
       }
       setBase(ctx.state, kind, id, undefined)
+      await dropBaseTree(ctx.configDir, kind, id)
       return 'done'
     }
 

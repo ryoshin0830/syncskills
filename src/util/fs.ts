@@ -1,4 +1,4 @@
-import { readdir, stat, lstat, mkdir, copyFile, readlink, realpath } from 'node:fs/promises'
+import { readdir, stat, mkdir, copyFile, realpath } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
 import type { Stats } from 'node:fs'
 
@@ -55,11 +55,3 @@ export async function copyTree(src: string, dest: string): Promise<void> {
   }
 }
 
-export async function isSymlink(p: string): Promise<boolean> {
-  const st = await lstat(p).catch(() => null)
-  return st !== null && st.isSymbolicLink()
-}
-
-export async function resolveLink(p: string): Promise<string> {
-  return readlink(p)
-}

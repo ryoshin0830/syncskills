@@ -144,17 +144,29 @@ export async function localSkillSides(p: CcPaths): Promise<Map<string, Side>> {
   return out
 }
 
+/**
+ * cc-switch's deep-link import carries a server's config and its app matrix but
+ * has no field for tags, so tags cannot be written to another machine through a
+ * supported path. Including them in the content hash would therefore make every
+ * tagged server differ forever and re-pull on every sync. They are excluded
+ * here and reported by `taggedMcpServers` instead of being dropped in silence.
+ */
 export function localMcpSides(p: CcPaths): Map<string, Side> {
   const out = new Map<string, Side>()
   for (const row of readMcp(p)) {
     const { sanitized } = stripSecrets(row.config)
     out.set(row.id, {
-      contentHash: canonicalJsonHash({ config: sanitized, tags: row.tags }),
+      contentHash: canonicalJsonHash({ config: sanitized }),
       apps: row.apps,
       payload: { config: row.config, tags: row.tags },
     })
   }
   return out
+}
+
+/** Servers carrying tags, which syncskills cannot transfer between machines. */
+export function taggedMcpServers(p: CcPaths): string[] {
+  return readMcp(p).filter((r) => r.tags.length > 0).map((r) => r.id).sort()
 }
 
 /**

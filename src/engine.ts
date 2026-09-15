@@ -135,15 +135,17 @@ export async function runSync(opts: EngineOptions): Promise<SyncOutcome> {
 
   let pushed = false
   if (!opts.dryRun && result.failed.length === 0) {
-    // Order matters. applyPlan has already updated the manifest in memory;
-    // write it, push it, store the secrets it refers to, and only then record
-    // the new base. If anything fails before saveState, the next run resolves
-    // from the old base and reaches the same decisions again.
+    // Order matters, and secrets come first. If the push landed and the secret
+    // write then failed, the next run would see local === remote, decide
+    // IN_SYNC, and never retry — leaving the other devices to rehydrate an
+    // empty credential from a blob that was never written. Publishing the
+    // manifest only after the secrets it refers to are safely stored means a
+    // failure here simply leaves the remote unchanged.
+    if (opts.useSecrets) await secrets.write(blob)
     await store.writeManifest(manifest)
     pushed = await store.commitAndPush(
       `sync from ${opts.config.device} (${result.applied.length} change(s))`,
     )
-    if (opts.useSecrets) await secrets.write(blob)
     await saveState(opts.configDir, state)
   }
 

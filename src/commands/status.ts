@@ -1,6 +1,6 @@
 import pc from 'picocolors'
 import { gather } from '../engine.js'
-import { unmanagedSkills } from '../ccswitch/read.js'
+import { unmanagedSkills, taggedMcpServers } from '../ccswitch/read.js'
 import { buildPlan } from '../core/plan.js'
 import { narrowByDirection } from '../engine.js'
 import { emitJson, line } from '../output.js'
@@ -11,6 +11,14 @@ import type { Io } from '../output.js'
 export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
   const { resolutions } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  const tagged = taggedMcpServers(opts.paths)
+  if (tagged.length > 0) {
+    io.warnings.push(
+      `tags on ${tagged.join(', ')} are not synced — cc-switch's import has no field ` +
+      `for them, so they stay on the machine that set them`,
+    )
+  }
 
   const unmanaged = unmanagedSkills(opts.paths)
   for (const d of unmanaged) {
@@ -34,6 +42,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
       })),
       conflicts: plan.conflicts.map((c) => ({ kind: c.kind, id: c.id })),
       unmanagedSkills: unmanaged,
+      untransferableTags: tagged,
     }, io)
     return 0
   }

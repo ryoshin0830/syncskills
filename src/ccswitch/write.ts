@@ -176,13 +176,17 @@ async function writeMcpEnv(
 async function ptyDelete(
   bin: string, id: string, env: Record<string, string>,
 ): Promise<boolean> {
+  // bin and id reach a Tcl interpreter, so they are passed as argv rather than
+  // interpolated into the script text.
   const script = `set timeout 30
-spawn ${bin} mcp delete ${id}
+set prog [lindex $argv 0]
+set target [lindex $argv 1]
+spawn $prog mcp delete $target
 expect {
   -re {\\(y/N\\)} { send "y\\r"; exp_continue }
   eof
 }`
-  const r = await run('expect', ['-'], { input: script, env })
+  const r = await run('expect', ['-', bin, id], { input: script, env })
   return r.code === 0 && /Deleted MCP server/.test(r.stdout)
 }
 
@@ -207,6 +211,11 @@ async function directDelete(
   const DatabaseSync = loadDatabaseSync()
   const db = new DatabaseSync(p.db)
   try {
+    const present = db.prepare('SELECT id FROM mcp_servers WHERE id = ?').get(id)
+    // Reporting a delete that matched nothing would let the caller record a
+    // base saying the server is gone while it is still there.
+    if (present === undefined) return false
+
     db.exec('BEGIN')
     db.prepare('DELETE FROM mcp_servers WHERE id = ?').run(id)
     db.exec('COMMIT')

@@ -179,6 +179,19 @@ Every apply also snapshots the cc-switch database and your whole skills tree to
 └── skills/         the skill content being synced
 ```
 
+## What it does not sync, and says so
+
+Two things cannot travel between machines through cc-switch's supported write
+paths. Rather than dropping them silently, `status` reports each one:
+
+- **A skill directory cc-switch has no row for.** syncskills syncs what cc-switch
+  manages. Adopt a stray directory with
+  `cc-switch skills import-from-apps <dir>` and it syncs from then on.
+- **Tags on an MCP server.** cc-switch's import carries a server's config and its
+  app matrix but has no field for tags, so they stay on the machine that set
+  them. They are deliberately excluded from the content hash: including them
+  would make every tagged server differ forever and re-pull on every sync.
+
 ## Design notes
 
 The full design and the verified integration contract with cc-switch are in

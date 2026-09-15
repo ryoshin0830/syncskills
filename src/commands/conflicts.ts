@@ -43,6 +43,13 @@ export async function conflictsCommand(
   }
 
   if (sub === 'restore') {
+    const wanted = positionals[2]
+    if (wanted !== undefined && wanted !== 'local' && wanted !== 'remote') {
+      const msg = `unknown side "${wanted}"; expected local or remote`
+      if (io.json) emitJsonError('conflicts', msg, io)
+      else process.stderr.write(`syncskills: ${msg}\n`)
+      return EXIT.ERROR
+    }
     const snap = snapshots.find((s) => s.id === id)
     if (snap === undefined) {
       const msg = `no snapshot ${id ?? '(none)'}; run \`syncskills conflicts\` to list them`
@@ -50,7 +57,16 @@ export async function conflictsCommand(
       else process.stderr.write(`syncskills: ${msg}\n`)
       return EXIT.ERROR
     }
-    const side = existsSync(join(snap.path, 'local')) ? 'local' : 'remote'
+    // Restoring the REMOTE side is the whole point after a bad merge, so it
+    // must be reachable; local is only the default.
+    const wantedSide = positionals[2] as 'local' | 'remote' | undefined
+    const side = wantedSide ?? (existsSync(join(snap.path, 'local')) ? 'local' : 'remote')
+    if (!existsSync(join(snap.path, side))) {
+      const msg = `snapshot ${snap.id} has no ${side} side`
+      if (io.json) emitJsonError('conflicts', msg, io)
+      else process.stderr.write(`syncskills: ${msg}\n`)
+      return EXIT.ERROR
+    }
     const dest = join(opts.paths.skillsDir, snap.item)
     await rm(dest, { recursive: true, force: true })
     await cp(join(snap.path, side), dest, { recursive: true })

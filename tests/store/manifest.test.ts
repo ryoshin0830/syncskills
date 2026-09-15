@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   emptyManifest, parseManifest, serializeManifest, manifestSides, upsertEntry, removeEntry,
+  unsafeManifestIds,
 } from '../../src/store/manifest.js'
 
 describe('manifest', () => {
@@ -107,5 +108,41 @@ describe('manifest', () => {
   it('rejects a manifest with no entries object', () => {
     expect(() => parseManifest(JSON.stringify({ schemaVersion: 1 })))
       .toThrow(/no entries object/)
+  })
+})
+
+describe('untrusted ids from the remote', () => {
+  const evil = (id: string, kind: 'skill' | 'repo' = 'skill') => {
+    const m = emptyManifest()
+    m.entries[`${kind}:${id}`] = {
+      kind, id, contentHash: 'sha256:x', apps: [], version: 1,
+      updatedAt: '2026-01-01T00:00:00.000Z', updatedBy: 'attacker',
+    }
+    return m
+  }
+
+  it('drops an id that climbs out of the skills directory', () => {
+    for (const id of ['../escape', 'a/../../b', '..', '.', 'a/b', '/abs', 'x\\\\y']) {
+      expect(manifestSides(evil(id), 'skill').size, id).toBe(0)
+    }
+  })
+
+  it('drops a hidden-directory id', () => {
+    expect(manifestSides(evil('.git'), 'skill').size).toBe(0)
+    expect(manifestSides(evil('.ssh'), 'skill').size).toBe(0)
+  })
+
+  it('keeps an ordinary skill id', () => {
+    expect(manifestSides(evil('code-review'), 'skill').size).toBe(1)
+  })
+
+  it('allows exactly one slash for a repository and no more', () => {
+    expect(manifestSides(evil('owner/name', 'repo'), 'repo').size).toBe(1)
+    expect(manifestSides(evil('owner/../name', 'repo'), 'repo').size).toBe(0)
+    expect(manifestSides(evil('a/b/c', 'repo'), 'repo').size).toBe(0)
+  })
+
+  it('reports what it refused rather than hiding it', () => {
+    expect(unsafeManifestIds(evil('../escape'))).toEqual(['skill:../escape'])
   })
 })

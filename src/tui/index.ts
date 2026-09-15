@@ -14,6 +14,7 @@ import { copyTree, walk } from '../util/fs.js'
 import { treeHash } from '../core/hash.js'
 import { setBase } from '../state.js'
 import { upsertEntry } from '../store/manifest.js'
+import { existingBaseTree, saveBaseTree } from '../basetree.js'
 import { summarize, renderDiff } from './diff.js'
 import { EXIT } from '../cli.js'
 import type { EngineOptions } from '../engine.js'
@@ -92,7 +93,12 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
       const mspin = p.spinner()
       mspin.start(`Merging ${c.id} with ${agent.name === 'none' ? 'git only' : agent.name}`)
+      // The recorded base makes this a genuine three-way merge: without it a
+      // deletion on one side cannot be told from an addition on the other, and
+      // every overlapping file goes to the agent needlessly.
+      const baseDir = existingBaseTree(opts.configDir, 'skill', c.id)
       const report = await mergeTrees({
+        ...(baseDir === undefined ? {} : { baseDir }),
         localDir, remoteDir, outDir, agent,
       })
       mspin.stop(
@@ -161,6 +167,7 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
 
       const side = { contentHash: await treeHash(localDir), apps: c.resolution.apps }
       setBase(state, 'skill', c.id, side)
+      await saveBaseTree(opts.configDir, 'skill', c.id, localDir)
       upsertEntry(manifest, 'skill', c.id, side, opts.config.device)
 
       await rm(store.itemDir('skill', c.id), { recursive: true, force: true })
@@ -204,11 +211,11 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
   if (result.failed.length === 0 && !opts.dryRun) {
     const pspin = p.spinner()
     pspin.start('Publishing')
+    if (opts.useSecrets) await secrets.write(blob)
     await store.writeManifest(manifest)
     const pushed = await store.commitAndPush(
       `sync from ${opts.config.device} (${result.applied.length} change(s))`,
     )
-    if (opts.useSecrets) await secrets.write(blob)
     await saveState(opts.configDir, state)
     pspin.stop(pushed ? 'Published' : 'Nothing to publish')
   }
