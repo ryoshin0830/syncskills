@@ -324,3 +324,61 @@ describe('MCP servers end to end', () => {
     expect((await B.sync()).plan.actions).toHaveLength(0)
   })
 })
+
+describe('MCP updates (regression: the deep link cannot update an existing server)', () => {
+  it('pulls a changed config instead of pushing the stale one back', async () => {
+    A.addMcpServer('srv', { type: 'stdio', command: 'v1' }, ['claude', 'codex'])
+    await A.sync(); await B.sync()
+
+    B.setMcpConfig('srv', { type: 'stdio', command: 'v2' })
+    await B.sync()
+
+    await A.sync()
+    expect(A.listMcpRows()[0]!.config).toMatchObject({ command: 'v2' })
+
+    const again = await A.sync()
+    expect(again.plan.actions).toHaveLength(0)
+  })
+
+  it('pulls a narrowed app matrix, which an additive import cannot express', async () => {
+    A.addMcpServer('srv', { type: 'stdio', command: 'x' }, ['claude', 'codex'])
+    await A.sync(); await B.sync()
+
+    B.setMcpApps('srv', ['claude'])
+    await B.sync()
+
+    await A.sync()
+    expect(A.listMcpRows()[0]!.apps).toEqual(['claude'])
+    expect((await A.sync()).plan.actions).toHaveLength(0)
+  })
+
+  it('handles a config change and a matrix change arriving together', async () => {
+    A.addMcpServer('srv', { type: 'stdio', command: 'v1' }, ['claude', 'codex'])
+    await A.sync(); await B.sync()
+
+    B.setMcpConfig('srv', { type: 'stdio', command: 'v2' })
+    B.setMcpApps('srv', ['claude'])
+    await B.sync()
+
+    await A.sync()
+    expect(A.listMcpRows()[0]!.config).toMatchObject({ command: 'v2' })
+    expect(A.listMcpRows()[0]!.apps).toEqual(['claude'])
+    expect((await A.sync()).plan.actions).toHaveLength(0)
+    expect((await B.sync()).plan.actions).toHaveLength(0)
+  })
+})
+
+describe('unsafe ids are refused symmetrically', () => {
+  it('does not push a skill whose name would be unsafe as a path elsewhere', async () => {
+    await A.writeSkill('.hidden', skill('hidden', 'v1'))
+    await A.writeSkill('normal', skill('normal', 'v1'))
+    const out = await A.sync()
+
+    expect(out.plan.actions.map((x) => x.id)).toEqual(['normal'])
+    expect(await A.readRemoteFile('manifest.json')).not.toContain('.hidden')
+
+    await B.sync()
+    expect(await B.readSkill('normal')).toContain('v1')
+    expect(await B.readSkill('.hidden')).toBeNull()
+  })
+})

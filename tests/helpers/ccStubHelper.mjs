@@ -17,7 +17,8 @@ if (kind === 'deeplink') {
       d.prepare('INSERT INTO mcp_servers (id,name,server_config,' + cols + ') VALUES (?,?,?,' + vals + ')')
         .run(sid, sid, JSON.stringify(cfg))
     } else {
-      // cc-switch's deeplink import is additive for apps and leaves the config alone.
+      // Faithful to the real binary, verified against it: the import is
+      // ADDITIVE for apps and leaves server_config untouched.
       const on = ALL.filter((a) => apps.includes(a)).map((a) => 'enabled_' + a + ' = 1').join(', ')
       if (on.length > 0) d.prepare('UPDATE mcp_servers SET ' + on + ' WHERE id = ?').run(sid)
     }
@@ -52,6 +53,10 @@ if (kind === 'deeplink') {
   } else {
     d.prepare('UPDATE skills SET ' + setsFor(list) + ' WHERE directory = ?').run(arg1)
   }
+} else if (kind === 'mcpdelete') {
+  d.prepare('DELETE FROM mcp_servers WHERE id = ?').run(arg1)
+  // The real binary prints this, and the writer greps for it.
+  console.log("Deleted MCP server '" + arg1 + "'")
 } else if (kind === 'mcp') {
   const list = (arg2 ?? '').split(',').filter(Boolean)
   d.prepare('UPDATE mcp_servers SET ' + setsFor(list) + ' WHERE id = ?').run(arg1)

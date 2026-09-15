@@ -10,6 +10,7 @@ import { localSkillSides, localMcpSides, localRepoSides } from './ccswitch/read.
 import { loadState, saveState } from './state.js'
 import { nullProvider, emptyBlob } from './secrets/provider.js'
 import { onePasswordProvider } from './secrets/onepassword.js'
+import { isSafeItemId } from './core/types.js'
 import type { ItemKind, Resolution, Side } from './core/types.js'
 import type { Config } from './config.js'
 import type { CcPaths } from './ccswitch/paths.js'
@@ -64,6 +65,8 @@ export async function readToken(configDir: string): Promise<string | undefined> 
 
 export interface Gathered {
   resolutions: Resolution[]
+  /** Local ids refused as unsafe to use as a path. Reported, never synced. */
+  unsafeLocalIds: string[]
   store: GitStore
   manifest: Manifest
   state: StateFile
@@ -91,12 +94,23 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
   const kinds = opts.only ?? ALL_KINDS
   const excluded = new Set(opts.config.excludes)
   const resolutions: Resolution[] = []
+  const unsafeLocalIds: string[] = []
 
   for (const kind of kinds) {
     const local =
       kind === 'skill' ? await localSkillSides(opts.paths)
       : kind === 'mcp' ? localMcpSides(opts.paths)
       : localRepoSides(opts.paths)
+
+    // An id that cannot safely become a path is refused on the way OUT as well
+    // as the way in. Pushing one the other machines will then refuse to pull
+    // would be worse than not syncing it: the two sides would disagree forever
+    // with nothing to show for it.
+    for (const id of [...local.keys()]) {
+      if (isSafeItemId(kind, id)) continue
+      unsafeLocalIds.push(`${kind}:${id}`)
+      local.delete(id)
+    }
 
     const base = new Map<string, Side>(
       Object.entries(state.items)
@@ -110,7 +124,7 @@ export async function gather(opts: EngineOptions): Promise<Gathered> {
     }
   }
 
-  return { resolutions, store, manifest, state, blob, secrets }
+  return { resolutions, store, manifest, state, blob, secrets, unsafeLocalIds }
 }
 
 export interface SyncOutcome {

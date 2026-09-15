@@ -38,6 +38,8 @@ export interface Device {
   addRepoRow(owner: string, name: string, branch?: string, enabled?: boolean): void
   addMcpServerWithTags(id: string, config: unknown, apps: string[], tags: string[]): void
   listMcpRows(): { id: string; config: Record<string, unknown>; apps: string[]; tags: string[] }[]
+  setMcpConfig(id: string, config: unknown): void
+  setMcpApps(id: string, apps: string[]): void
   listRepoRows(): { owner: string; name: string; branch: string; enabled: boolean }[]
   addUnmanagedSkillDir(dir: string, body: string): Promise<void>
   setSkillApps(dir: string, apps: string[]): void
@@ -67,6 +69,7 @@ case "$1 $2" in
   "skills import-from-apps") node "$HELPER" "$DB" skill "$3" "$5" ;;
   "skills set-apps")         node "$HELPER" "$DB" skill "$3" "$5" ;;
   "mcp set-apps")            node "$HELPER" "$DB" mcp   "$3" "$5" ;;
+  "mcp delete")              node "$HELPER" "$DB" mcpdelete "$3" ;;
   "skills repos")            node "$HELPER" "$DB" repo  "$4" "$3" ;;
   "skills sync")             : ;;
   *)
@@ -150,6 +153,29 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
 
     listMcpRows() {
       return readMcp(paths)
+    },
+
+    setMcpConfig(id, config_) {
+      const DatabaseSync = loadDatabaseSync()
+      const d = new DatabaseSync(paths.db)
+      try {
+        d.prepare('UPDATE mcp_servers SET server_config = ? WHERE id = ?')
+          .run(JSON.stringify(config_), id)
+      } finally {
+        d.close()
+      }
+    },
+
+    setMcpApps(id, apps) {
+      const ALL = ['claude', 'codex', 'gemini', 'opencode', 'hermes', 'grokbuild']
+      const DatabaseSync = loadDatabaseSync()
+      const d = new DatabaseSync(paths.db)
+      try {
+        const sets = ALL.map((a) => `enabled_${a} = ${apps.includes(a) ? 1 : 0}`).join(', ')
+        d.prepare(`UPDATE mcp_servers SET ${sets} WHERE id = ?`).run(id)
+      } finally {
+        d.close()
+      }
     },
 
     addRepoRow(owner, name, branch = 'main', enabled = true) {

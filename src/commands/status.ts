@@ -9,8 +9,15 @@ import type { EngineOptions } from '../engine.js'
 import type { Io } from '../output.js'
 
 export async function statusCommand(opts: EngineOptions, io: Io): Promise<number> {
-  const { resolutions } = await gather(opts)
+  const { resolutions, unsafeLocalIds } = await gather(opts)
   const plan = narrowByDirection(buildPlan(resolutions), opts.direction)
+
+  for (const id of unsafeLocalIds) {
+    io.warnings.push(
+      `${id} cannot be synced: its name would not be safe to use as a path on ` +
+      `another machine. Rename it to sync it.`,
+    )
+  }
 
   const tagged = taggedMcpServers(opts.paths)
   if (tagged.length > 0) {
@@ -43,6 +50,7 @@ export async function statusCommand(opts: EngineOptions, io: Io): Promise<number
       conflicts: plan.conflicts.map((c) => ({ kind: c.kind, id: c.id })),
       unmanagedSkills: unmanaged,
       untransferableTags: tagged,
+      unsafeIds: unsafeLocalIds,
     }, io)
     return 0
   }

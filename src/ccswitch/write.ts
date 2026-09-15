@@ -55,6 +55,12 @@ export function createWriter(opts: {
   const bin = opts.bin ?? 'cc-switch'
   const env = { CC_SWITCH_TEST_DISABLE_OPEN: '1', ...opts.env }
 
+  async function removeMcp(id: string): Promise<DeleteOutcome> {
+    if (await ptyDelete(bin, id, env).catch(() => false)) return 'deleted'
+    if (await directDelete(bin, id, opts.paths, env).catch(() => false)) return 'deleted'
+    return 'pending'
+  }
+
   async function cc(args: string[], what: string): Promise<void> {
     const r = await run(bin, args, { env })
     if (r.code !== 0) {
@@ -70,16 +76,34 @@ export function createWriter(opts: {
     },
 
     async importMcpWithSecrets(id, config, env, apps) {
+      const existed = mcpExists(opts.paths, id)
+
       const blanked: Record<string, unknown> = { ...config }
-      const real = Object.entries(env).filter(([, v]) => v !== '')
       if (config.env !== null && typeof config.env === 'object' && !Array.isArray(config.env)) {
         blanked.env = Object.fromEntries(Object.keys(config.env).map((k) => [k, '']))
       }
 
-      await cc(['deeplink', buildDeeplink(id, blanked, apps)], 'deeplink import')
-      if (real.length === 0) return 'deleted'
+      // The deep link is additive: for a server that already exists it adds
+      // apps and leaves server_config untouched, so it cannot carry an updated
+      // configuration. Removing it first is the supported way to replace one,
+      // and it keeps working while the cc-switch app is open.
+      if (existed) {
+        const removed = await removeMcp(id)
+        if (removed === 'pending') return 'pending'
+      }
 
-      const ok = await writeMcpEnv(opts.paths, id, Object.fromEntries(real)).catch(() => false)
+      await cc(['deeplink', buildDeeplink(id, blanked, apps)], 'deeplink import')
+
+      // set-apps replaces the matrix outright, which the additive import cannot
+      // do — without this a harness disabled elsewhere is never disabled here.
+      await cc(['mcp', 'set-apps', id, '--apps', apps.join(',')], 'mcp set-apps')
+
+      // Credentials are the one thing that cannot travel through a deep link
+      // without landing on a command line, so they go through the database.
+      const hasSecrets = Object.values(env).some((v) => v !== '')
+      if (!hasSecrets) return 'deleted'
+
+      const ok = await writeMcpConfig(opts.paths, id, config).catch(() => false)
       return ok ? 'deleted' : 'pending'
     },
 
@@ -118,45 +142,47 @@ export function createWriter(opts: {
      * prompt under a pseudo-terminal, delete the row directly with cc-switch
      * stopped, or report the deletion as awaiting the user.
      */
-    async deleteMcp(id) {
-      if (await ptyDelete(bin, id, env).catch(() => false)) return 'deleted'
-      if (await directDelete(bin, id, opts.paths, env).catch(() => false)) return 'deleted'
-      return 'pending'
-    },
+    deleteMcp: removeMcp,
+  }
+}
+
+function mcpExists(p: CcPaths, id: string): boolean {
+  if (!existsSync(p.db)) return false
+  const DatabaseSync = loadDatabaseSync()
+  const db = new DatabaseSync(p.db, { readOnly: true })
+  try {
+    return db.prepare('SELECT id FROM mcp_servers WHERE id = ?').get(id) !== undefined
+  } finally {
+    db.close()
   }
 }
 
 /**
- * Fill in an MCP server's real environment values.
+ * Write an MCP server's whole configuration, credentials included.
  *
- * cc-switch offers no non-interactive way to set them that does not put the
- * value on a command line, so this edits server_config in the database under
- * the same guard as the delete fallback: refuse while cc-switch is running,
- * one transaction, integrity checked afterwards.
+ * The deep link cannot update an existing server, and cc-switch offers no
+ * non-interactive way to set one that avoids putting the value on a command
+ * line. So this edits server_config directly, under the same guard as the
+ * delete fallback: refuse while cc-switch is running, one transaction,
+ * integrity checked afterwards.
  */
-async function writeMcpEnv(
-  p: CcPaths, id: string, env: Record<string, string>,
+async function writeMcpConfig(
+  p: CcPaths, id: string, config: Record<string, unknown>,
 ): Promise<boolean> {
   if (!existsSync(p.db)) return false
 
   const ps = await run('pgrep', ['-f', 'cc-switch|ccswitch'])
   if (ps.code === 0 && ps.stdout.trim().length > 0) {
     throw new Error(
-      `cc-switch is running, so the credentials for "${id}" were not written. ` +
-      `Quit cc-switch and sync again, or set them yourself in cc-switch.`,
+      `cc-switch is running, so "${id}" was not updated. ` +
+      `Quit cc-switch and sync again, or change it yourself in cc-switch.`,
     )
   }
 
   const DatabaseSync = loadDatabaseSync()
   const db = new DatabaseSync(p.db)
   try {
-    const row = db.prepare('SELECT server_config FROM mcp_servers WHERE id = ?').get(id) as
-      { server_config?: string } | undefined
-    if (row?.server_config === undefined) return false
-
-    const config = JSON.parse(row.server_config) as Record<string, unknown>
-    const current = (config.env ?? {}) as Record<string, unknown>
-    config.env = { ...current, ...env }
+    if (db.prepare('SELECT id FROM mcp_servers WHERE id = ?').get(id) === undefined) return false
 
     db.exec('BEGIN')
     db.prepare('UPDATE mcp_servers SET server_config = ? WHERE id = ?')
@@ -186,7 +212,9 @@ expect {
   -re {\\(y/N\\)} { send "y\\r"; exp_continue }
   eof
 }`
-  const r = await run('expect', ['-', bin, id], { input: script, env })
+  // `expect - a b` would read "a" as a script file; `--` ends option parsing so
+  // the script still comes from stdin and the rest lands in $argv.
+  const r = await run('expect', ['--', '-', bin, id], { input: script, env })
   return r.code === 0 && /Deleted MCP server/.test(r.stdout)
 }
 
