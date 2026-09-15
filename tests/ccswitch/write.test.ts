@@ -99,3 +99,40 @@ describe('CcWriter', () => {
     await expect(w.setMcpApps('o', ['claude'])).rejects.toThrow(/mcp set-apps failed/)
   })
 })
+
+describe('importMcpWithSecrets', () => {
+  let stub: Stub
+  let f: FakeHome
+  beforeEach(async () => {
+    stub = await makeStubBin('cc-switch')
+    f = await makeFakeCcSwitch()
+  })
+
+  it('never puts a credential on the command line', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f })
+    await w.importMcpWithSecrets(
+      'o',
+      { type: 'stdio', command: 'x', env: { API_KEY: 'sk-super-secret-value' } },
+      { API_KEY: 'sk-super-secret-value' },
+      ['claude'],
+    ).catch(() => undefined)
+
+    const calls = (await stub.calls()).join('\n')
+    expect(calls).not.toContain('sk-super-secret-value')
+
+    // The deeplink still carries the KEY NAME, which is part of the shape.
+    const url = calls.split(' ').find((t) => t.startsWith('ccswitch://'))!
+    const b64 = new URL(url).searchParams.get('config')!
+    const doc = Buffer.from(b64, 'base64url').toString('utf8')
+    expect(doc).not.toContain('sk-super-secret-value')
+    expect(doc).toContain('API_KEY')
+  })
+
+  it('reports success without touching the database when there is nothing secret', async () => {
+    const w = createWriter({ bin: stub.bin, paths: f })
+    const outcome = await w.importMcpWithSecrets(
+      'o', { type: 'stdio', command: 'x' }, {}, ['claude'],
+    )
+    expect(outcome).toBe('deleted')
+  })
+})

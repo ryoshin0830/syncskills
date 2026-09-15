@@ -65,3 +65,14 @@ describe('scanForSecrets', () => {
     expect(scanForSecrets(doc)).toEqual([])
   })
 })
+
+describe('diff output never carries a credential (regression)', () => {
+  it('stripSecrets is what diff renders, so a real value cannot reach the terminal', async () => {
+    const { stripSecrets } = await import('../../src/ccswitch/read.js')
+    const raw = { type: 'stdio', command: 'x', env: { API_KEY: 'sk-live-do-not-print' } }
+    const rendered = JSON.stringify(stripSecrets(raw).sanitized, null, 2)
+    expect(rendered).not.toContain('sk-live-do-not-print')
+    expect(rendered).toContain('API_KEY')
+    expect(scanForSecrets(rendered)).toEqual([])
+  })
+})

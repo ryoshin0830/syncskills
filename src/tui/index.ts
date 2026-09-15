@@ -5,7 +5,7 @@ import * as p from '@clack/prompts'
 import pc from 'picocolors'
 import { gather, narrowByDirection } from '../engine.js'
 import { buildPlan } from '../core/plan.js'
-import { applyPlan } from '../core/apply.js'
+import { applyPlan, assertNoSecrets } from '../core/apply.js'
 import { createWriter } from '../ccswitch/write.js'
 import { saveState } from '../state.js'
 import { pickAgent } from '../merge/agent.js'
@@ -137,6 +137,17 @@ export async function runTui(opts: EngineOptions, io: Io): Promise<number> {
       }
 
       const source = choice === 'accept' ? outDir : choice === 'remote' ? remoteDir : localDir
+
+      if (opts.dryRun) {
+        p.log.info(`${c.id}: would take the ${choice} version (dry run, nothing written)`)
+        continue
+      }
+
+      // A merge can pull a credential in from either side, so the resolved tree
+      // faces the same gate as any other push. A secret in git history cannot
+      // be taken back.
+      await assertNoSecrets(source, `skills/${c.id}`)
+
       if (source !== localDir) {
         await rm(localDir, { recursive: true, force: true })
         await copyTree(source, localDir)

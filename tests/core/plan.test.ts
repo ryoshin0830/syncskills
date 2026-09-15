@@ -88,3 +88,30 @@ describe('buildPlan', () => {
     expect(p.actions.map((a) => a.kind)).toEqual(['mcp', 'skill'])
   })
 })
+
+describe('pruneBackups', () => {
+  it('keeps only the most recent backups, because each one holds credentials', async () => {
+    const { pruneBackups } = await import('../../src/core/apply.js')
+    const { mkdtemp, mkdir, readdir } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+
+    const root = await mkdtemp(join(tmpdir(), 'ss-bk-'))
+    for (let i = 0; i < 15; i++) {
+      await mkdir(join(root, `2026-09-15T00-00-${String(i).padStart(2, '0')}Z`))
+    }
+    const removed = await pruneBackups(root, 10)
+    expect(removed).toHaveLength(5)
+    expect(await readdir(root)).toHaveLength(10)
+  })
+
+  it('does nothing when there are fewer than the limit', async () => {
+    const { pruneBackups } = await import('../../src/core/apply.js')
+    const { mkdtemp, mkdir } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const root = await mkdtemp(join(tmpdir(), 'ss-bk2-'))
+    await mkdir(join(root, 'a'))
+    expect(await pruneBackups(root, 10)).toEqual([])
+  })
+})

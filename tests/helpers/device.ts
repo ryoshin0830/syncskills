@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { runSync, gather } from '../../src/engine.js'
 import { loadState } from '../../src/state.js'
 import { makeFakeCcSwitch, addSkill, addMcp, addRepo, type FakeHome } from './fakeCcSwitch.js'
-import { readRepos } from '../../src/ccswitch/read.js'
+import { readRepos, readSkills } from '../../src/ccswitch/read.js'
 import { loadDatabaseSync } from '../../src/util/sqlite.js'
 import type { Config } from '../../src/config.js'
 import type { SyncOutcome } from '../../src/engine.js'
@@ -37,6 +37,8 @@ export interface Device {
   addRepoRow(owner: string, name: string, branch?: string, enabled?: boolean): void
   listRepoRows(): { owner: string; name: string; branch: string; enabled: boolean }[]
   addUnmanagedSkillDir(dir: string, body: string): Promise<void>
+  setSkillApps(dir: string, apps: string[]): void
+  readSkillApps(dir: string): string[]
 
   readRemoteFile(relPath: string): Promise<string | null>
   readState(): Promise<StateFile>
@@ -105,7 +107,7 @@ case "$1 $2" in
   "mcp set-apps")            node "$HELPER" "$DB" mcp   "$3" "$5" ;;
   "skills sync")             : ;;
   "skills repos")            node "$HELPER" "$DB" repo "$4" "$3" ;;
-  "deeplink "*)              : ;;
+  "deeplink")                : ;;
   *)                         : ;;
 esac
 exit 0
@@ -178,6 +180,23 @@ export async function makeDevice(name: string, remote: string): Promise<Device> 
 
     listRepoRows() {
       return readRepos(paths)
+    },
+
+    setSkillApps(dir, apps) {
+      const ALL = ['claude', 'codex', 'gemini', 'opencode', 'hermes', 'grokbuild']
+      const DatabaseSync = loadDatabaseSync()
+      const d = new DatabaseSync(paths.db)
+      try {
+        const sets = ALL.map((a) => `enabled_${a} = ${apps.includes(a) ? 1 : 0}`).join(', ')
+        d.prepare(`UPDATE skills SET ${sets} WHERE directory = ?`).run(dir)
+      } finally {
+        d.close()
+      }
+    },
+
+    readSkillApps(dir) {
+      const row = readSkills(paths).find((r) => r.directory === dir)
+      return row === undefined ? [] : row.apps
     },
 
     async addUnmanagedSkillDir(dir, body) {

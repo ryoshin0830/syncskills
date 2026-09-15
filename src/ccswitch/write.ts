@@ -30,6 +30,14 @@ export type DeleteOutcome = 'deleted' | 'pending'
 
 export interface CcWriter {
   importMcp(id: string, config: Record<string, unknown>, apps: App[]): Promise<void>
+  /**
+   * Import a server whose env holds real credentials. The deep link carries the
+   * shape with blank values — a URL becomes a command argument, and argv is
+   * readable by other processes — and the values are written separately.
+   */
+  importMcpWithSecrets(
+    id: string, config: Record<string, unknown>, env: Record<string, string>, apps: App[],
+  ): Promise<DeleteOutcome>
   setMcpApps(id: string, apps: App[]): Promise<void>
   deleteMcp(id: string): Promise<DeleteOutcome>
   importSkill(dir: string, apps: App[]): Promise<void>
@@ -59,6 +67,20 @@ export function createWriter(opts: {
   return {
     async importMcp(id, config, apps) {
       await cc(['deeplink', buildDeeplink(id, config, apps)], 'deeplink import')
+    },
+
+    async importMcpWithSecrets(id, config, env, apps) {
+      const blanked: Record<string, unknown> = { ...config }
+      const real = Object.entries(env).filter(([, v]) => v !== '')
+      if (config.env !== null && typeof config.env === 'object' && !Array.isArray(config.env)) {
+        blanked.env = Object.fromEntries(Object.keys(config.env).map((k) => [k, '']))
+      }
+
+      await cc(['deeplink', buildDeeplink(id, blanked, apps)], 'deeplink import')
+      if (real.length === 0) return 'deleted'
+
+      const ok = await writeMcpEnv(opts.paths, id, Object.fromEntries(real)).catch(() => false)
+      return ok ? 'deleted' : 'pending'
     },
 
     async setMcpApps(id, apps) {
@@ -102,6 +124,52 @@ export function createWriter(opts: {
       return 'pending'
     },
   }
+}
+
+/**
+ * Fill in an MCP server's real environment values.
+ *
+ * cc-switch offers no non-interactive way to set them that does not put the
+ * value on a command line, so this edits server_config in the database under
+ * the same guard as the delete fallback: refuse while cc-switch is running,
+ * one transaction, integrity checked afterwards.
+ */
+async function writeMcpEnv(
+  p: CcPaths, id: string, env: Record<string, string>,
+): Promise<boolean> {
+  if (!existsSync(p.db)) return false
+
+  const ps = await run('pgrep', ['-f', 'cc-switch|ccswitch'])
+  if (ps.code === 0 && ps.stdout.trim().length > 0) {
+    throw new Error(
+      `cc-switch is running, so the credentials for "${id}" were not written. ` +
+      `Quit cc-switch and sync again, or set them yourself in cc-switch.`,
+    )
+  }
+
+  const DatabaseSync = loadDatabaseSync()
+  const db = new DatabaseSync(p.db)
+  try {
+    const row = db.prepare('SELECT server_config FROM mcp_servers WHERE id = ?').get(id) as
+      { server_config?: string } | undefined
+    if (row?.server_config === undefined) return false
+
+    const config = JSON.parse(row.server_config) as Record<string, unknown>
+    const current = (config.env ?? {}) as Record<string, unknown>
+    config.env = { ...current, ...env }
+
+    db.exec('BEGIN')
+    db.prepare('UPDATE mcp_servers SET server_config = ? WHERE id = ?')
+      .run(JSON.stringify(config), id)
+    db.exec('COMMIT')
+
+    const check = db.prepare('PRAGMA integrity_check').get() as Record<string, unknown>
+    const verdict = String(Object.values(check)[0])
+    if (verdict !== 'ok') throw new Error(`database integrity check failed: ${verdict}`)
+  } finally {
+    db.close()
+  }
+  return true
 }
 
 /** Answer cc-switch's confirmation prompt through expect(1). */

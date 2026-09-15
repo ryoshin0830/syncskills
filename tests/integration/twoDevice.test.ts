@@ -251,3 +251,46 @@ describe('repositories and unmanaged skills', () => {
     expect(unmanagedSkills(A.paths)).toEqual(['stray'])
   })
 })
+
+describe('app matrix convergence (regression: a merged matrix must reach both sides)', () => {
+  it('does not revert the other device’s enablement after a local content edit', async () => {
+    await A.writeSkill('s', skill('s', 'v1'), ['claude'])
+    await A.sync(); await B.sync()
+
+    // B enables the skill for another harness and publishes that.
+    await B.setSkillApps('s', ['claude', 'gemini'])
+    await B.sync()
+
+    // A edits the text — a push — while the remote matrix has moved on.
+    await A.writeSkill('s', skill('s', 'v2'))
+    await A.sync()
+    expect(A.readSkillApps('s')).toEqual(['claude', 'gemini'])
+
+    // The next sync must not undo B's enablement.
+    const third = await A.sync()
+    expect(third.plan.actions.map((x) => x.type)).not.toContain('set-apps')
+    expect(A.readSkillApps('s')).toEqual(['claude', 'gemini'])
+
+    await B.sync()
+    expect(B.readSkillApps('s')).toEqual(['claude', 'gemini'])
+  })
+
+  it('does not lose a local enablement after pulling someone else’s content edit', async () => {
+    await A.writeSkill('s', skill('s', 'v1'), ['claude'])
+    await A.sync(); await B.sync()
+
+    // A enables locally but does not sync; B edits the text and publishes.
+    await A.setSkillApps('s', ['claude', 'hermes'])
+    await B.writeSkill('s', skill('s', 'from-B'))
+    await B.sync()
+
+    await A.sync()
+    expect(await A.readSkill('s')).toContain('from-B')
+    expect(A.readSkillApps('s')).toEqual(['claude', 'hermes'])
+
+    const again = await A.sync()
+    expect(again.plan.actions).toHaveLength(0)
+    await B.sync()
+    expect(B.readSkillApps('s')).toEqual(['claude', 'hermes'])
+  })
+})

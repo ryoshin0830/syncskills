@@ -1,4 +1,4 @@
-import { mkdir, rm, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, rm, readFile, writeFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { copyTree, walk } from '../util/fs.js'
@@ -46,17 +46,28 @@ export async function snapshot(ctx: ApplyContext): Promise<string> {
   const dir = join(ctx.configDir, 'backups', stamp)
   await mkdir(dir, { recursive: true })
 
+  // cc-switch.db holds raw env values, so this copy is a credential store.
   if (existsSync(ctx.paths.db)) {
-    await writeFile(join(dir, 'cc-switch.db'), await readFile(ctx.paths.db))
+    await writeFile(join(dir, 'cc-switch.db'), await readFile(ctx.paths.db), { mode: 0o600 })
   }
   if (existsSync(ctx.paths.skillsDir)) {
     await copyTree(ctx.paths.skillsDir, join(dir, 'skills'))
   }
+  await pruneBackups(join(ctx.configDir, 'backups'))
   return dir
 }
 
+/** Keep the most recent backups only; an unbounded pile of database copies is
+ *  an unbounded pile of credentials. */
+export async function pruneBackups(root: string, keep = 10): Promise<string[]> {
+  const entries = await readdir(root).catch(() => [])
+  const stale = entries.sort().slice(0, Math.max(0, entries.length - keep))
+  for (const name of stale) await rm(join(root, name), { recursive: true, force: true })
+  return stale
+}
+
 /** Refuse to stage anything that looks like a credential. */
-async function assertNoSecrets(dir: string, label: string): Promise<void> {
+export async function assertNoSecrets(dir: string, label: string): Promise<void> {
   for await (const e of walk(dir)) {
     const text = await readFile(e.abs, 'utf8').catch(() => null)
     if (text === null) continue
@@ -103,6 +114,19 @@ export async function applyPlan(plan: Plan, ctx: ApplyContext): Promise<ApplyRes
   return result
 }
 
+/**
+ * Put the merged app matrix on this machine when it differs from what
+ * cc-switch currently has. Recording a merged matrix without applying it is how
+ * one device silently reverts another's enablement on the following sync.
+ */
+async function applyMergedApps(ctx: ApplyContext, action: Action): Promise<void> {
+  const { kind, id, resolution } = action
+  const current = resolution.local?.apps ?? []
+  if (JSON.stringify(current) === JSON.stringify(resolution.apps)) return
+  if (kind === 'skill') await ctx.writer.setSkillApps(id, resolution.apps)
+  else if (kind === 'mcp') await ctx.writer.setMcpApps(id, resolution.apps)
+}
+
 async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pending'> {
   const { kind, id, resolution } = action
 
@@ -125,19 +149,27 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         await rm(dest, { recursive: true, force: true })
         await copyTree(src, dest)
         await ctx.writer.importSkill(id, resolution.apps)
-        setBase(ctx.state, kind, id, { contentHash: await treeHash(dest), apps: resolution.apps })
+        const pulled = { contentHash: await treeHash(dest), apps: resolution.apps }
+        setBase(ctx.state, kind, id, pulled)
+        // The merged matrix must reach the manifest as well; otherwise the
+        // remote still advertises the old one and the next run pulls it back.
+        upsertEntry(ctx.manifest, kind, id, pulled, ctx.device)
         return 'done'
       }
 
       if (kind === 'mcp') {
         const sanitized = await ctx.store.readItemJson('mcp', id)
         if (sanitized === null) throw new Error(`remote mcp/${id}.json is missing from the store`)
-        const config = rehydrate(sanitized, ctx.blob.mcp[id]?.env ?? {})
-        await ctx.writer.importMcp(id, config, resolution.apps)
-        setBase(ctx.state, kind, id, {
+        const env = ctx.blob.mcp[id]?.env ?? {}
+        const config = rehydrate(sanitized, env)
+        const outcome = await ctx.writer.importMcpWithSecrets(id, config, env, resolution.apps)
+        if (outcome === 'pending') return 'pending'
+        const pulledMcp = {
           contentHash: canonicalJsonHash({ config: sanitized, tags: [] }),
           apps: resolution.apps,
-        })
+        }
+        setBase(ctx.state, kind, id, pulledMcp)
+        upsertEntry(ctx.manifest, kind, id, pulledMcp, ctx.device)
         return 'done'
       }
 
@@ -151,10 +183,9 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         const branch = String(stored.branch ?? 'main')
         const enabled = stored.enabled === true
         await ctx.writer.addRepo(owner, name, branch, enabled)
-        setBase(ctx.state, kind, id, {
-          contentHash: canonicalJsonHash({ branch, enabled }),
-          apps: [],
-        })
+        const pulledRepo = { contentHash: canonicalJsonHash({ branch, enabled }), apps: [] }
+        setBase(ctx.state, kind, id, pulledRepo)
+        upsertEntry(ctx.manifest, kind, id, pulledRepo, ctx.device)
         return 'done'
       }
 
@@ -170,6 +201,11 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
         const dest = ctx.store.itemDir('skill', id)
         await rm(dest, { recursive: true, force: true })
         await copyTree(src, dest)
+
+        // The matrix we record is the MERGED one. It has to land on this
+        // machine too, or the next run reads the disagreement as a deliberate
+        // local change and pushes it back, undoing the other device's work.
+        await applyMergedApps(ctx, action)
 
         const side = { contentHash: await treeHash(src), apps: resolution.apps }
         setBase(ctx.state, kind, id, side)
@@ -195,6 +231,8 @@ async function applyOne(action: Action, ctx: ApplyContext): Promise<'done' | 'pe
 
         await ctx.store.writeItemJson('mcp', id, sanitized)
         if (Object.keys(secrets).length > 0) ctx.blob.mcp[id] = { env: secrets }
+
+        await applyMergedApps(ctx, action)
 
         const side = {
           contentHash: canonicalJsonHash({ config: sanitized, tags: payload.tags }),

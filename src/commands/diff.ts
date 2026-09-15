@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { gather } from '../engine.js'
+import { stripSecrets } from '../ccswitch/read.js'
 import { walk } from '../util/fs.js'
 import { renderDiff } from '../tui/diff.js'
 import { emitJson, emitJsonError, line } from '../output.js'
@@ -62,8 +63,13 @@ export async function diffCommand(
   }
 
   const remote = await store.readItemJson(r.kind, id)
-  const localPayload = (r.local?.payload ?? null) as { config?: unknown } | null
-  const localText = JSON.stringify(localPayload?.config ?? null, null, 2)
+  const localPayload = (r.local?.payload ?? null) as { config?: Record<string, unknown> } | null
+  // The payload carries real env values. What the remote holds — and what we
+  // are allowed to show — is the sanitized shape.
+  const localConfig = localPayload?.config === undefined
+    ? null
+    : stripSecrets(localPayload.config).sanitized
+  const localText = JSON.stringify(localConfig, null, 2)
   const remoteText = JSON.stringify(remote, null, 2)
   const diff = renderDiff(remoteText, localText)
 
